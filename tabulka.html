@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <link rel="stylesheet" href="./tabulka.css">
+    <title>Document</title>
+</head>
+<body>
+    <h1>Tabulka výsledkov</h1>
+
+    <button id="btn-admin-login">Admin prihlásenie</button>
+
+        <div id="admin-panel"></div>
+        
+    <button id="btn-register">Registrovať sa</button>
+    <button id="btn-login">Prihlásiť sa</button>
+    <button id="btn-logout">Odhlásiť sa</button>
+    <p id="login-info">Nikto nie je prihlásený</p>
+
+    <input 
+        type="text" 
+        id="round-name" 
+        placeholder="Názov kola"
+    >
+
+    <input 
+    type="datetime-local" 
+    id="round-deadline"
+    >
+
+    <button id="btn-round">
+        Pridať kolo
+    </button>
+
+    <button id="btn-reset">
+        Vymazať všetko
+    </button>
+
+    <button id="btn-backup">
+        Stiahnuť zálohu
+    </button>
+
+    <button id="btn-restore">
+        Nahrať zálohu
+    </button>
+    <input
+        type="file"
+        id="backup-file"
+        accept=".json"
+        style="display: none;"
+>
+   
+    
+    <table>
+        <thead>
+            <tr>
+                <th>Poradie</th>
+                <th>Meno</th>
+                <th>Body</th>
+            </tr>
+        </thead>
+        <tbody id="table-body">
+          
+        </tbody>
+    </table>
+    <h1>Tabulka zápasov</h1>    
+    <div id="table-round">
+       
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="./tabulka.js"></script>
+</body>
+</html>
+
