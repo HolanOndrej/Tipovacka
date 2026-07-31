@@ -248,3 +248,62 @@ th small {
     font-weight: 500;
     color: #cbd5e1;
 }
+
+
+/* okno na výber domáceho a hosťujúceho tímu */
+.team-picker-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    background: rgba(2, 6, 23, 0.78);
+    backdrop-filter: blur(4px);
+}
+
+.team-picker-modal {
+    width: min(460px, 100%);
+    padding: 22px;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    border-radius: 18px;
+    background: #0f172a;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+}
+
+.team-picker-modal h3 {
+    margin: 0 0 18px;
+    color: #f8fafc;
+    font-size: 22px;
+}
+
+.team-picker-modal label {
+    display: grid;
+    gap: 7px;
+    margin-top: 14px;
+    color: #cbd5e1;
+    font-weight: 700;
+}
+
+.team-picker-modal select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    background: #020617;
+    color: #e2e8f0;
+    font-size: 16px;
+}
+
+.team-picker-error {
+    min-height: 22px;
+    margin: 10px 0 0;
+    color: #fca5a5;
+}
+
+.team-picker-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+}

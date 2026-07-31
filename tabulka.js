@@ -19,6 +19,22 @@ let adminPinSession = null
 let openedPlayers = {}
 let isLoading = false
 
+// Prednastavené tímy pre výber pri pridávaní zápasu.
+const TEAMS = [
+    "Slovan Bratislava",
+    "Podbrezová",
+    "Žilina",
+    "Trnava",
+    "Ružomberok",
+    "Dunajská Streda",
+    "Skalica",
+    "FC Košice",
+    "Komárno",
+    "Trenčín",
+    "Michalovce",
+    "B. Bystrica"
+]
+
 // =============================================================
 // 3. POMOCNÉ FUNKCIE
 // =============================================================
@@ -28,6 +44,107 @@ const rpc = async (functionName, parameters = {}) => {
     if (error) throw error
 
     return data
+}
+
+
+const chooseMatchName = () => {
+    return new Promise(resolve => {
+        const overlay = document.createElement("div")
+        overlay.className = "team-picker-overlay"
+
+        const modal = document.createElement("div")
+        modal.className = "team-picker-modal"
+        modal.setAttribute("role", "dialog")
+        modal.setAttribute("aria-modal", "true")
+        modal.setAttribute("aria-labelledby", "team-picker-title")
+
+        const title = document.createElement("h3")
+        title.id = "team-picker-title"
+        title.textContent = "Vyber tímy"
+
+        const homeLabel = document.createElement("label")
+        homeLabel.textContent = "Domáci tím"
+
+        const homeSelect = document.createElement("select")
+        homeSelect.innerHTML = '<option value="">-- vyber domáci tím --</option>'
+
+        const awayLabel = document.createElement("label")
+        awayLabel.textContent = "Hosťujúci tím"
+
+        const awaySelect = document.createElement("select")
+        awaySelect.innerHTML = '<option value="">-- vyber hosťujúci tím --</option>'
+
+        TEAMS.forEach(team => {
+            const homeOption = document.createElement("option")
+            homeOption.value = team
+            homeOption.textContent = team
+            homeSelect.appendChild(homeOption)
+
+            const awayOption = document.createElement("option")
+            awayOption.value = team
+            awayOption.textContent = team
+            awaySelect.appendChild(awayOption)
+        })
+
+        const errorText = document.createElement("p")
+        errorText.className = "team-picker-error"
+        errorText.setAttribute("aria-live", "polite")
+
+        const actions = document.createElement("div")
+        actions.className = "team-picker-actions"
+
+        const cancelButton = document.createElement("button")
+        cancelButton.type = "button"
+        cancelButton.textContent = "Zrušiť"
+
+        const addButton = document.createElement("button")
+        addButton.type = "button"
+        addButton.textContent = "Pridať zápas"
+
+        const close = value => {
+            document.removeEventListener("keydown", handleEscape)
+            overlay.remove()
+            resolve(value)
+        }
+
+        const handleEscape = event => {
+            if (event.key === "Escape") close(null)
+        }
+
+        cancelButton.addEventListener("click", () => close(null))
+
+        addButton.addEventListener("click", () => {
+            const homeTeam = homeSelect.value
+            const awayTeam = awaySelect.value
+
+            if (!homeTeam || !awayTeam) {
+                errorText.textContent = "Vyber domáci aj hosťujúci tím."
+                return
+            }
+
+            if (homeTeam === awayTeam) {
+                errorText.textContent = "Domáci a hosťujúci tím nemôžu byť rovnaké."
+                return
+            }
+
+            close(`${homeTeam} : ${awayTeam}`)
+        })
+
+        overlay.addEventListener("click", event => {
+            if (event.target === overlay) close(null)
+        })
+
+        document.addEventListener("keydown", handleEscape)
+
+        homeLabel.appendChild(homeSelect)
+        awayLabel.appendChild(awaySelect)
+        actions.append(cancelButton, addButton)
+        modal.append(title, homeLabel, awayLabel, errorText, actions)
+        overlay.appendChild(modal)
+        document.body.appendChild(overlay)
+
+        homeSelect.focus()
+    })
 }
 
 const getErrorMessage = (error, fallback) => {
@@ -440,7 +557,7 @@ const renderRoundsTable = () => {
         addMatchButton.hidden = !isAdmin && !loggedPlayer
 
         addMatchButton.addEventListener("click", async () => {
-            const matchName = prompt("Zadaj zápas, napr. Slovan : Trnava")
+            const matchName = await chooseMatchName()
             if (!matchName) return
 
             try {
