@@ -154,8 +154,19 @@ const updateControlsVisibility = () => {
     const registerButton = document.querySelector("#btn-register")
     const loginButton = document.querySelector("#btn-login")
     const loginInfo = document.querySelector("#login-info")
+    const resetButton = document.querySelector("#btn-reset")
+    const backupButton = document.querySelector("#btn-backup")
+    const restoreButton = document.querySelector("#btn-restore")
 
-    adminControls.hidden = !isAdmin
+    // Kolo, zápas a výsledok môže pridávať admin aj každý
+    // schválený prihlásený hráč. Mazanie a zálohy ostávajú adminovi.
+    const canManageGame = Boolean(isAdmin || loggedPlayer)
+
+    adminControls.hidden = !canManageGame
+    resetButton.hidden = !isAdmin
+    backupButton.hidden = !isAdmin
+    restoreButton.hidden = !isAdmin
+
     logoutButton.hidden = !loggedPlayer && !isAdmin
     adminLoginButton.hidden = isAdmin || Boolean(loggedPlayer)
     registerButton.hidden = isAdmin || Boolean(loggedPlayer)
@@ -277,16 +288,30 @@ const saveTip = async (matchId, home, away) => {
 }
 
 const saveResult = async (matchId, home, away) => {
-    if (!isAdmin || !adminPinSession) return
+    if (!isAdmin && !loggedPlayer) {
+        alert("Najprv sa musíš prihlásiť.")
+        return
+    }
+
     if (home === "" || away === "") return
 
     try {
-        await rpc("save_result", {
-            p_admin_pin: adminPinSession,
-            p_match_id: matchId,
-            p_home: Number(home),
-            p_away: Number(away)
-        })
+        if (isAdmin) {
+            await rpc("save_result", {
+                p_admin_pin: adminPinSession,
+                p_match_id: matchId,
+                p_home: Number(home),
+                p_away: Number(away)
+            })
+        } else {
+            await rpc("player_save_result", {
+                p_player_id: loggedPlayer.id,
+                p_pin: loggedPlayer.pin,
+                p_match_id: matchId,
+                p_home: Number(home),
+                p_away: Number(away)
+            })
+        }
 
         await refreshAllData()
     } catch (error) {
@@ -322,18 +347,27 @@ const renderRoundsTable = () => {
 
         const addMatchButton = document.createElement("button")
         addMatchButton.textContent = "Pridať zápas"
-        addMatchButton.hidden = !isAdmin
+        addMatchButton.hidden = !isAdmin && !loggedPlayer
 
         addMatchButton.addEventListener("click", async () => {
             const matchName = prompt("Zadaj zápas, napr. Slovan : Trnava")
             if (!matchName) return
 
             try {
-                await rpc("add_match", {
-                    p_admin_pin: adminPinSession,
-                    p_round_id: round.id,
-                    p_name: matchName
-                })
+                if (isAdmin) {
+                    await rpc("add_match", {
+                        p_admin_pin: adminPinSession,
+                        p_round_id: round.id,
+                        p_name: matchName
+                    })
+                } else {
+                    await rpc("player_add_match", {
+                        p_player_id: loggedPlayer.id,
+                        p_pin: loggedPlayer.pin,
+                        p_round_id: round.id,
+                        p_name: matchName
+                    })
+                }
 
                 await refreshAllData()
             } catch (error) {
@@ -514,8 +548,9 @@ const renderRoundsTable = () => {
             resultAway.max = "99"
             resultHome.value = match.result_home ?? ""
             resultAway.value = match.result_away ?? ""
-            resultHome.disabled = !isAdmin
-            resultAway.disabled = !isAdmin
+            const canEnterResult = Boolean(isAdmin || loggedPlayer)
+            resultHome.disabled = !canEnterResult
+            resultAway.disabled = !canEnterResult
 
             const saveCurrentResult = () => {
                 saveResult(match.id, resultHome.value, resultAway.value)
@@ -836,7 +871,10 @@ const restoreButton = document.querySelector("#btn-restore")
 const backupFile = document.querySelector("#backup-file")
 
 addRoundButton.addEventListener("click", async () => {
-    if (!isAdmin || !adminPinSession) return
+    if (!isAdmin && !loggedPlayer) {
+        alert("Najprv sa musíš prihlásiť.")
+        return
+    }
 
     const nameInput = document.querySelector("#round-name")
     const deadlineInput = document.querySelector("#round-deadline")
@@ -850,11 +888,20 @@ addRoundButton.addEventListener("click", async () => {
     }
 
     try {
-        await rpc("add_round", {
-            p_admin_pin: adminPinSession,
-            p_name: name,
-            p_deadline: new Date(deadline).toISOString()
-        })
+        if (isAdmin) {
+            await rpc("add_round", {
+                p_admin_pin: adminPinSession,
+                p_name: name,
+                p_deadline: new Date(deadline).toISOString()
+            })
+        } else {
+            await rpc("player_add_round", {
+                p_player_id: loggedPlayer.id,
+                p_pin: loggedPlayer.pin,
+                p_name: name,
+                p_deadline: new Date(deadline).toISOString()
+            })
+        }
 
         nameInput.value = ""
         deadlineInput.value = ""
