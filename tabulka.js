@@ -851,7 +851,6 @@ const renderRoundsTable = () => {
 
         const totalRow = document.createElement("tr")
         const totalLabel = document.createElement("td")
-        totalLabel.classList.add("sticky-match-column")
         totalLabel.textContent = "Body v kole"
         totalLabel.colSpan = 2
         totalRow.appendChild(totalLabel)
