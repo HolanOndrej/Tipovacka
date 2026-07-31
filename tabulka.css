@@ -307,3 +307,38 @@ th small {
     gap: 8px;
     margin-top: 12px;
 }
+
+
+/* Na mobile ostane názov zápasu viditeľný pri vodorovnom posúvaní tabuľky. */
+@media (max-width: 768px) {
+    .round-card .table-scroll {
+        position: relative;
+    }
+
+    .round-card .sticky-match-column {
+        position: sticky;
+        left: 0;
+        z-index: 4;
+        width: 150px;
+        min-width: 150px;
+        max-width: 150px;
+        background: #0f172a;
+        box-shadow: 7px 0 12px rgba(2, 6, 23, 0.7);
+        overflow-wrap: anywhere;
+    }
+
+    .round-card thead .sticky-match-column {
+        z-index: 7;
+        background: #1e293b;
+    }
+
+    .round-card tbody tr:hover .sticky-match-column,
+    .round-card .active-match-row .sticky-match-column {
+        background: #162033;
+    }
+
+    .round-card .sticky-match-column button {
+        padding: 5px 7px;
+        font-size: 12px;
+    }
+}

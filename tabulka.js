@@ -627,6 +627,7 @@ const renderRoundsTable = () => {
         const matchHeader = document.createElement("th")
         matchHeader.textContent = "Zápas"
         matchHeader.rowSpan = 2
+        matchHeader.classList.add("sticky-match-column")
 
         const resultHeader = document.createElement("th")
         resultHeader.textContent = "Výsledok"
@@ -690,6 +691,8 @@ const renderRoundsTable = () => {
             })
 
             const matchCell = document.createElement("td")
+            matchCell.classList.add("sticky-match-column")
+
             const matchName = document.createElement("span")
             matchName.textContent = match.name
             matchCell.appendChild(matchName)
@@ -848,6 +851,7 @@ const renderRoundsTable = () => {
 
         const totalRow = document.createElement("tr")
         const totalLabel = document.createElement("td")
+        totalLabel.classList.add("sticky-match-column")
         totalLabel.textContent = "Body v kole"
         totalLabel.colSpan = 2
         totalRow.appendChild(totalLabel)
