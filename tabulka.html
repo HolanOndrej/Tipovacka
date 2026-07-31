@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="./tabulka.css">
+    <link rel="stylesheet" href="./tabulka.css?v=4">
     <title>Tipovacia hra</title>
 </head>
 <body>
@@ -21,6 +21,7 @@
     <div id="admin-panel"></div>
 
     <section id="admin-game-controls" aria-label="Správa hry">
+        <p class="permission-note">Kolá, zápasy a výsledky môže pridávať každý schválený hráč. Mazanie a zálohy sú iba pre admina.</p>
         <input
             type="text"
             id="round-name"
@@ -52,16 +53,24 @@
                     <th>Poradie</th>
                     <th>Meno</th>
                     <th>Body</th>
+                    <th title="T-B1: body získané v zápasoch Trnavy">T-B1<br><small>Trnava</small></th>
+                    <th title="T-B2: počet presných tipov za 10 bodov">T-B2<br><small>10 bodov</small></th>
                 </tr>
             </thead>
             <tbody id="table-body"></tbody>
         </table>
     </div>
 
+    <p class="tie-breaker-note">
+        <strong>T-B1:</strong> body získané v zápasoch, ktorých názov obsahuje „Trnava“.
+        <strong>T-B2:</strong> počet presných tipov za 10 bodov.
+        Pri rovnosti celkových bodov rozhoduje najprv T-B1 a potom T-B2.
+    </p>
+
     <h1>Tabuľka zápasov</h1>
     <div id="table-round"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="./tabulka.js"></script>
+    <script src="./tabulka.js?v=4"></script>
 </body>
 </html>

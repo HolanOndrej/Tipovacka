@@ -231,3 +231,20 @@ button:disabled {
     opacity: 0.55;
     cursor: wait;
 }
+
+
+/* vysvetlenie pomocných kritérií poradia */
+.tie-breaker-note {
+    margin: 10px 0 28px;
+    padding: 12px 14px;
+    border-left: 4px solid rgba(56, 189, 248, 0.75);
+    border-radius: 8px;
+    background: rgba(56, 189, 248, 0.08);
+    line-height: 1.55;
+}
+
+th small {
+    font-size: 0.75em;
+    font-weight: 500;
+    color: #cbd5e1;
+}

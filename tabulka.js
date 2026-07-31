@@ -147,6 +147,68 @@ const getRoundPoints = (round, playerId) => {
     return total
 }
 
+// T-B1: body získané v zápasoch, ktorých názov obsahuje „Trnava“.
+const countTrnavaPoints = (playerId) => {
+    let total = 0
+
+    rounds.forEach(round => {
+        if (!isRoundClosed(round)) return
+
+        ;(round.matches || []).forEach(match => {
+            const matchName = String(match.name || "").toLocaleLowerCase("sk")
+            if (!matchName.includes("trnava")) return
+            if (match.result_home === null || match.result_away === null) return
+
+            const tip = getTip(match, playerId)
+            if (!tip) return
+
+            total += calculateMatchPoints(
+                {
+                    home: Number(match.result_home),
+                    away: Number(match.result_away)
+                },
+                {
+                    home: Number(tip.home),
+                    away: Number(tip.away)
+                }
+            )
+        })
+    })
+
+    return total
+}
+
+// T-B2: počet presných tipov, za ktoré hráč získal 10 bodov.
+const countExactTenPointTips = (playerId) => {
+    let exactTips = 0
+
+    rounds.forEach(round => {
+        if (!isRoundClosed(round)) return
+
+        ;(round.matches || []).forEach(match => {
+            if (match.result_home === null || match.result_away === null) return
+
+            const tip = getTip(match, playerId)
+            if (!tip) return
+
+            const points = calculateMatchPoints(
+                {
+                    home: Number(match.result_home),
+                    away: Number(match.result_away)
+                },
+                {
+                    home: Number(tip.home),
+                    away: Number(tip.away)
+                }
+            )
+
+            if (points === 10) exactTips += 1
+        })
+    })
+
+    return exactTips
+}
+
 const updateControlsVisibility = () => {
     const adminControls = document.querySelector("#admin-game-controls")
     const logoutButton = document.querySelector("#btn-logout")
@@ -154,8 +216,19 @@ const updateControlsVisibility = () => {
     const registerButton = document.querySelector("#btn-register")
     const loginButton = document.querySelector("#btn-login")
     const loginInfo = document.querySelector("#login-info")
+    const resetButton = document.querySelector("#btn-reset")
+    const backupButton = document.querySelector("#btn-backup")
+    const restoreButton = document.querySelector("#btn-restore")
 
-    adminControls.hidden = !isAdmin
+    // Kolo, zápas a výsledok môže pridávať admin aj každý
+    // schválený prihlásený hráč. Mazanie a zálohy ostávajú adminovi.
+    const canManageGame = Boolean(isAdmin || loggedPlayer)
+
+    adminControls.hidden = !canManageGame
+    resetButton.hidden = !isAdmin
+    backupButton.hidden = !isAdmin
+    restoreButton.hidden = !isAdmin
+
     logoutButton.hidden = !loggedPlayer && !isAdmin
     adminLoginButton.hidden = isAdmin || Boolean(loggedPlayer)
     registerButton.hidden = isAdmin || Boolean(loggedPlayer)
@@ -224,10 +297,24 @@ const renderPlayersTable = () => {
     const orderedPlayers = players
         .map(player => ({
             ...player,
-            points: countPlayerPoints(player.id)
+            points: countPlayerPoints(player.id),
+            trnavaPoints: countTrnavaPoints(player.id),
+            exactTenPointTips: countExactTenPointTips(player.id)
         }))
         .sort((a, b) => {
+            // Hlavné poradie: celkové body.
             if (b.points !== a.points) return b.points - a.points
+
+            // T-B1: pri rovnosti bodov rozhodujú body zo zápasov Trnavy.
+            if (b.trnavaPoints !== a.trnavaPoints) {
+                return b.trnavaPoints - a.trnavaPoints
+            }
+
+            // T-B2: potom počet presných 10-bodových tipov.
+            if (b.exactTenPointTips !== a.exactTenPointTips) {
+                return b.exactTenPointTips - a.exactTenPointTips
+            }
+
             return a.name.localeCompare(b.name, "sk")
         })
 
@@ -243,7 +330,21 @@ const renderPlayersTable = () => {
         const pointsCell = document.createElement("td")
         pointsCell.textContent = String(player.points)
 
-        row.append(orderCell, nameCell, pointsCell)
+        const trnavaPointsCell = document.createElement("td")
+        trnavaPointsCell.textContent = String(player.trnavaPoints)
+        trnavaPointsCell.title = "T-B1: body získané v zápasoch Trnavy"
+
+        const exactTipsCell = document.createElement("td")
+        exactTipsCell.textContent = String(player.exactTenPointTips)
+        exactTipsCell.title = "T-B2: počet presných tipov za 10 bodov"
+
+        row.append(
+            orderCell,
+            nameCell,
+            pointsCell,
+            trnavaPointsCell,
+            exactTipsCell
+        )
         tableBody.appendChild(row)
     })
 }
@@ -277,16 +378,30 @@ const saveTip = async (matchId, home, away) => {
 }
 
 const saveResult = async (matchId, home, away) => {
-    if (!isAdmin || !adminPinSession) return
+    if (!isAdmin && !loggedPlayer) {
+        alert("Najprv sa musíš prihlásiť.")
+        return
+    }
+
     if (home === "" || away === "") return
 
     try {
-        await rpc("save_result", {
-            p_admin_pin: adminPinSession,
-            p_match_id: matchId,
-            p_home: Number(home),
-            p_away: Number(away)
-        })
+        if (isAdmin) {
+            await rpc("save_result", {
+                p_admin_pin: adminPinSession,
+                p_match_id: matchId,
+                p_home: Number(home),
+                p_away: Number(away)
+            })
+        } else {
+            await rpc("player_save_result", {
+                p_player_id: loggedPlayer.id,
+                p_pin: loggedPlayer.pin,
+                p_match_id: matchId,
+                p_home: Number(home),
+                p_away: Number(away)
+            })
+        }
 
         await refreshAllData()
     } catch (error) {
@@ -322,18 +437,27 @@ const renderRoundsTable = () => {
 
         const addMatchButton = document.createElement("button")
         addMatchButton.textContent = "Pridať zápas"
-        addMatchButton.hidden = !isAdmin
+        addMatchButton.hidden = !isAdmin && !loggedPlayer
 
         addMatchButton.addEventListener("click", async () => {
             const matchName = prompt("Zadaj zápas, napr. Slovan : Trnava")
             if (!matchName) return
 
             try {
-                await rpc("add_match", {
-                    p_admin_pin: adminPinSession,
-                    p_round_id: round.id,
-                    p_name: matchName
-                })
+                if (isAdmin) {
+                    await rpc("add_match", {
+                        p_admin_pin: adminPinSession,
+                        p_round_id: round.id,
+                        p_name: matchName
+                    })
+                } else {
+                    await rpc("player_add_match", {
+                        p_player_id: loggedPlayer.id,
+                        p_pin: loggedPlayer.pin,
+                        p_round_id: round.id,
+                        p_name: matchName
+                    })
+                }
 
                 await refreshAllData()
             } catch (error) {
@@ -514,8 +638,9 @@ const renderRoundsTable = () => {
             resultAway.max = "99"
             resultHome.value = match.result_home ?? ""
             resultAway.value = match.result_away ?? ""
-            resultHome.disabled = !isAdmin
-            resultAway.disabled = !isAdmin
+            const canEnterResult = Boolean(isAdmin || loggedPlayer)
+            resultHome.disabled = !canEnterResult
+            resultAway.disabled = !canEnterResult
 
             const saveCurrentResult = () => {
                 saveResult(match.id, resultHome.value, resultAway.value)
@@ -836,7 +961,10 @@ const restoreButton = document.querySelector("#btn-restore")
 const backupFile = document.querySelector("#backup-file")
 
 addRoundButton.addEventListener("click", async () => {
-    if (!isAdmin || !adminPinSession) return
+    if (!isAdmin && !loggedPlayer) {
+        alert("Najprv sa musíš prihlásiť.")
+        return
+    }
 
     const nameInput = document.querySelector("#round-name")
     const deadlineInput = document.querySelector("#round-deadline")
@@ -850,11 +978,20 @@ addRoundButton.addEventListener("click", async () => {
     }
 
     try {
-        await rpc("add_round", {
-            p_admin_pin: adminPinSession,
-            p_name: name,
-            p_deadline: new Date(deadline).toISOString()
-        })
+        if (isAdmin) {
+            await rpc("add_round", {
+                p_admin_pin: adminPinSession,
+                p_name: name,
+                p_deadline: new Date(deadline).toISOString()
+            })
+        } else {
+            await rpc("player_add_round", {
+                p_player_id: loggedPlayer.id,
+                p_pin: loggedPlayer.pin,
+                p_name: name,
+                p_deadline: new Date(deadline).toISOString()
+            })
+        }
 
         nameInput.value = ""
         deadlineInput.value = ""
