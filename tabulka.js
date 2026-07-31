@@ -1,1159 +1,969 @@
-// ==============================
+// =============================================================
 // 1. PRIPOJENIE NA SUPABASE
-// ==============================
+// =============================================================
 const SUPABASE_URL = "https://uisokzgwgmtezxgrpdtc.supabase.co"
 const SUPABASE_KEY = "sb_publishable_ZhVISeAmC1eQkikZGW3YtA_fPjyFnQF"
 
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
-// ==============================
-// 2. HLAVNÉ DÁTA APLIKÁCIE
-// ==============================
-// HRACI a ICH TIPY
-let players = {}
 
-// SKUTOCNE VYSLEDKY
+// =============================================================
+// 2. STAV APLIKÁCIE
+// =============================================================
+let players = []
+let rounds = []
+let pendingPlayers = []
 
-let seasson = [];
-
-let loggedPlayerKey = null
-
-let openedPlayers = {}
-
+let loggedPlayer = null
 let isAdmin = false
-const ADMIN_PIN = "951753"
+let adminPinSession = null
+let openedPlayers = {}
+let isLoading = false
 
-const playerColors = [
-    "#d4edff",
-    "#d4ffd9",
-    "#fff3b0",
-    "#ffd6d6",
-    "#e4d4ff",
-    "#ffd9b3",
-    "#d6fff5",
-    "#f7d6ff"
-]
+// =============================================================
+// 3. POMOCNÉ FUNKCIE
+// =============================================================
+const rpc = async (functionName, parameters = {}) => {
+    const { data, error } = await supabaseClient.rpc(functionName, parameters)
 
+    if (error) throw error
 
-
-// ==============================
-// ULOŽENIE DÁT DO SUPABASE
-// ==============================
-const saveToStorage = async () => {
-    const { data, error } = await supabaseClient
-        .from("app_data")
-        .update({
-            players: players,
-            seasson: seasson
-        })
-        .eq("id", "main")
-        .select()
-
-    if (error) {
-        console.error("Chyba pri ukladaní:", error)
-    } else {
-        console.log("Uložené OK:", data)
-    }
+    return data
 }
 
-// ==============================
-// NAČÍTANIE DÁT ZO SUPABASE
-// ==============================
-const loadFromStorage = async () => {
-    const { data, error } = await supabaseClient
-        .from("app_data")
-        .select("players, seasson")
-        .eq("id", "main")
-        .maybeSingle()
+const getErrorMessage = (error, fallback) => {
+    if (!error) return fallback
 
-    if (error) {
-        console.error("Chyba pri načítaní:", error)
-        return
-    }
-
-    if (data) {
-        console.log("Načítané zo Supabase")
-        players = data.players || {}
-        seasson = data.seasson || []
-    } else {
-        console.log("Supabase je prázdny")
-        players = {}
-        seasson = []
-    }
+    return error.message || error.details || fallback
 }
 
-// ==============================
-// ZISTENIE VÍŤAZA ZÁPASU: 1 / X / 2
-// ==============================
+const setLoading = (loading) => {
+    isLoading = loading
 
-const get1X2 = (match) => {
-    
-    if (match.home > match.away) {
-        return 1 
-    } else if (match.home === match.away){
-        return "X"
-    } else if (match.home < match.away){
-        return 2
-    }
-}
-
-// ==============================
-// VÝPOČET BODOV ZA JEDEN ZÁPAS
-// ==============================
-const points = (match) => {
-    const resultDiff = match.result.home - match.result.away;
-    const myTipDiff = match.myTips.home - match.myTips.away;
-
-    const resultPointsTwo = () => {
-     return  match.result.home + match.result.away 
-    }
-    const myTipsPointsTwo = () => {
-     return  match.myTips.home + match.myTips.away 
-    }  
-
-    if (match.result.home === match.myTips.home && match.result.away === match.myTips.away){
-        return 10
-    } else if(get1X2(match.result) === get1X2(match.myTips) && resultDiff === myTipDiff ){
-        return 6
-    }else if (get1X2(match.result) === get1X2(match.myTips) && resultPointsTwo() === myTipsPointsTwo()){
-        return 6
-    }else if (get1X2(match.result) === get1X2(match.myTips)){
-        return 4
-    }else if (resultPointsTwo() === myTipsPointsTwo()){
-        return 2
-    } else {
-        return 0
-    }
-}
-// ==============================
-// VÝPOČET CELKOVÝCH BODOV HRÁČA
-// ==============================
-const countPlayerPoints = (player) => {
-  let seassonPoints = 0;
-
-  for (let roundIndex = 0; roundIndex < seasson.length; roundIndex++) {
-    let roundPoints = 0
-
-    for (let matchIndex = 0; matchIndex < seasson[roundIndex].matches.length; matchIndex++) {
-      const myTips = player.tips?.[roundIndex]?.[matchIndex]?.myTips
-      const result = seasson[roundIndex].matches[matchIndex].result
-
-      if (!myTips) continue
-
-      if (result.home === null || result.away === null) continue
-
-      const matchObject = {
-        name: seasson[roundIndex].matches[matchIndex].name,
-        result: result,
-        myTips: myTips
-      }
-
-      const matchPoints = points(matchObject)
-      roundPoints += matchPoints
-    }
-
-    seassonPoints += roundPoints
-  }
-
-  return seassonPoints
-}
-
-
-
-// ==============================
-// VYKRESLENIE HLAVNEJ TABUĽKY HRÁČOV
-// ==============================
-const renderPlayersTable = () => {
-    const tBody = document.querySelector("#table-body")
-    tBody.innerHTML = ""
-
-    const table = Object.values(players).map(player => ({
-        name: player.name,
-        points: countPlayerPoints(player)
-    }))
-
-    table.sort((a, b) => b.points - a.points)
-
-    table.forEach((player, index) => {
-        const tr = document.createElement("tr")
-
-        const tdOrder = document.createElement("td")
-        tdOrder.textContent = index + 1
-
-        const tdName = document.createElement("td")
-        tdName.textContent = player.name
-
-        const tdPoints = document.createElement("td")
-        tdPoints.textContent = player.points
-
-        tr.appendChild(tdOrder)
-        tr.appendChild(tdName)
-        tr.appendChild(tdPoints)
-
-        tBody.appendChild(tr)
+    document.querySelectorAll("button").forEach(button => {
+        button.disabled = loading
     })
 }
 
-// ==============================
-// ULOŽENIE TIPU HRÁČA
-// ==============================
-const saveTip = async (playerKey, roundIndex, matchIndex, home, away) => {
-    const deadline = seasson[roundIndex].deadline
+const isRoundClosed = (round) => {
+    if (!round.deadline) return false
 
-    if (deadline && new Date() > new Date(deadline)) {
-        alert("Tipovanie pre toto kolo je už uzavreté.")
-        renderAll()
-        return
+    return new Date(round.deadline) <= new Date()
+}
+
+const getTip = (match, playerId) => {
+    return (match.tips || []).find(tip => {
+        return Number(tip.player_id) === Number(playerId)
+    }) || null
+}
+
+const get1X2 = ({ home, away }) => {
+    if (home > away) return 1
+    if (home === away) return "X"
+    return 2
+}
+
+const calculateMatchPoints = (result, tip) => {
+    if (!result || !tip) return 0
+
+    const resultDiff = result.home - result.away
+    const tipDiff = tip.home - tip.away
+    const resultSum = result.home + result.away
+    const tipSum = tip.home + tip.away
+
+    if (result.home === tip.home && result.away === tip.away) {
+        return 10
     }
 
-    if (home === "" || away === "") return
-
-    const { data, error } = await supabaseClient
-        .from("app_data")
-        .select("players, seasson")
-        .eq("id", "main")
-        .maybeSingle()
-
-    if (error) {
-        console.error("Chyba pri načítaní aktuálnych dát:", error)
-        return
+    if (get1X2(result) === get1X2(tip) && resultDiff === tipDiff) {
+        return 6
     }
 
-    const latestPlayers = data.players || {}
-    const latestSeasson = data.seasson || []
-
-    latestPlayers[playerKey].tips[roundIndex][matchIndex].myTips = {
-        home: Number(home),
-        away: Number(away)
+    if (get1X2(result) === get1X2(tip) && resultSum === tipSum) {
+        return 6
     }
 
-    const { error: updateError } = await supabaseClient
-        .from("app_data")
-        .update({
-            players: latestPlayers,
-            seasson: latestSeasson
+    if (get1X2(result) === get1X2(tip)) {
+        return 4
+    }
+
+    if (resultSum === tipSum) {
+        return 2
+    }
+
+    return 0
+}
+
+const countPlayerPoints = (playerId) => {
+    let total = 0
+
+    rounds.forEach(round => {
+        if (!isRoundClosed(round)) return
+
+        ;(round.matches || []).forEach(match => {
+            if (match.result_home === null || match.result_away === null) return
+
+            const tip = getTip(match, playerId)
+            if (!tip) return
+
+            total += calculateMatchPoints(
+                {
+                    home: Number(match.result_home),
+                    away: Number(match.result_away)
+                },
+                {
+                    home: Number(tip.home),
+                    away: Number(tip.away)
+                }
+            )
         })
-        .eq("id", "main")
+    })
 
-    if (updateError) {
-        console.error("Chyba pri ukladaní tipu:", updateError)
+    return total
+}
+
+const getRoundPoints = (round, playerId) => {
+    if (!isRoundClosed(round)) return 0
+
+    let total = 0
+
+    ;(round.matches || []).forEach(match => {
+        if (match.result_home === null || match.result_away === null) return
+
+        const tip = getTip(match, playerId)
+        if (!tip) return
+
+        total += calculateMatchPoints(
+            {
+                home: Number(match.result_home),
+                away: Number(match.result_away)
+            },
+            {
+                home: Number(tip.home),
+                away: Number(tip.away)
+            }
+        )
+    })
+
+    return total
+}
+
+const updateControlsVisibility = () => {
+    const adminControls = document.querySelector("#admin-game-controls")
+    const logoutButton = document.querySelector("#btn-logout")
+    const adminLoginButton = document.querySelector("#btn-admin-login")
+    const registerButton = document.querySelector("#btn-register")
+    const loginButton = document.querySelector("#btn-login")
+    const loginInfo = document.querySelector("#login-info")
+
+    adminControls.hidden = !isAdmin
+    logoutButton.hidden = !loggedPlayer && !isAdmin
+    adminLoginButton.hidden = isAdmin || Boolean(loggedPlayer)
+    registerButton.hidden = isAdmin || Boolean(loggedPlayer)
+    loginButton.hidden = isAdmin || Boolean(loggedPlayer)
+
+    if (isAdmin) {
+        loginInfo.textContent = "Prihlásený: ADMIN"
+    } else if (loggedPlayer) {
+        loginInfo.textContent = `Prihlásený: ${loggedPlayer.name}`
+    } else {
+        loginInfo.textContent = "Nikto nie je prihlásený"
+    }
+}
+
+// =============================================================
+// 4. NAČÍTANIE DÁT
+// =============================================================
+const loadGameData = async () => {
+    const data = await rpc("get_game_data", {
+        p_player_id: loggedPlayer?.id ?? null,
+        p_pin: loggedPlayer?.pin ?? null
+    })
+
+    players = Array.isArray(data?.players) ? data.players : []
+    rounds = Array.isArray(data?.rounds) ? data.rounds : []
+}
+
+const loadPendingPlayers = async () => {
+    if (!isAdmin || !adminPinSession) {
+        pendingPlayers = []
         return
     }
 
-    players = latestPlayers
-    seasson = latestSeasson
+    const data = await rpc("get_pending_players", {
+        p_admin_pin: adminPinSession
+    })
 
-    renderAll()
+    pendingPlayers = Array.isArray(data) ? data : []
 }
 
-// ==============================
-// ULOŽENIE SKUTOČNÉHO VÝSLEDKU ZÁPASU
-// ==============================
-const saveResult = (roundIndex, matchIndex, home, away) => {
-    if (home === "" || away === "") return
+const refreshAllData = async () => {
+    if (isLoading) return
 
-    seasson[roundIndex].matches[matchIndex].result = {
-        home: Number(home),
-        away: Number(away)
+    setLoading(true)
+
+    try {
+        await loadGameData()
+        await loadPendingPlayers()
+        renderAll()
+    } catch (error) {
+        console.error("Načítanie zlyhalo:", error)
+        alert(getErrorMessage(error, "Údaje sa nepodarilo načítať."))
+    } finally {
+        setLoading(false)
+        updateControlsVisibility()
+    }
+}
+
+// =============================================================
+// 5. VYKRESLENIE HLAVNEJ TABUĽKY
+// =============================================================
+const renderPlayersTable = () => {
+    const tableBody = document.querySelector("#table-body")
+    tableBody.innerHTML = ""
+
+    const orderedPlayers = players
+        .map(player => ({
+            ...player,
+            points: countPlayerPoints(player.id)
+        }))
+        .sort((a, b) => {
+            if (b.points !== a.points) return b.points - a.points
+            return a.name.localeCompare(b.name, "sk")
+        })
+
+    orderedPlayers.forEach((player, index) => {
+        const row = document.createElement("tr")
+
+        const orderCell = document.createElement("td")
+        orderCell.textContent = String(index + 1)
+
+        const nameCell = document.createElement("td")
+        nameCell.textContent = player.name
+
+        const pointsCell = document.createElement("td")
+        pointsCell.textContent = String(player.points)
+
+        row.append(orderCell, nameCell, pointsCell)
+        tableBody.appendChild(row)
+    })
+}
+
+// =============================================================
+// 6. ULOŽENIE TIPU A VÝSLEDKU
+// =============================================================
+const saveTip = async (matchId, home, away) => {
+    if (!loggedPlayer) {
+        alert("Najprv sa musíš prihlásiť.")
+        return
     }
 
-    saveToStorage()
-    renderAll()
+    if (home === "" || away === "") return
+
+    try {
+        await rpc("save_tip", {
+            p_player_id: loggedPlayer.id,
+            p_pin: loggedPlayer.pin,
+            p_match_id: matchId,
+            p_home: Number(home),
+            p_away: Number(away)
+        })
+
+        await refreshAllData()
+    } catch (error) {
+        console.error("Tip sa nepodarilo uložiť:", error)
+        alert(getErrorMessage(error, "Tip sa nepodarilo uložiť."))
+        await refreshAllData()
+    }
 }
 
-// ==============================
-// VYKRESLENIE TABULIEK JEDNOTLIVÝCH KÔL
-// ==============================
+const saveResult = async (matchId, home, away) => {
+    if (!isAdmin || !adminPinSession) return
+    if (home === "" || away === "") return
+
+    try {
+        await rpc("save_result", {
+            p_admin_pin: adminPinSession,
+            p_match_id: matchId,
+            p_home: Number(home),
+            p_away: Number(away)
+        })
+
+        await refreshAllData()
+    } catch (error) {
+        console.error("Výsledok sa nepodarilo uložiť:", error)
+        alert(getErrorMessage(error, "Výsledok sa nepodarilo uložiť."))
+        await refreshAllData()
+    }
+}
+
+// =============================================================
+// 7. VYKRESLENIE KÔL A ZÁPASOV
+// =============================================================
 const renderRoundsTable = () => {
     const tableRound = document.querySelector("#table-round")
     tableRound.innerHTML = ""
 
-    seasson.forEach((round, roundIndex) => {
-        // vytvorenie obalu pre jedno kolo
-        const roundWrapper = document.createElement("div")
+    rounds.forEach((round, roundIndex) => {
+        const roundWrapper = document.createElement("section")
+        roundWrapper.className = "round-card"
 
-        // názov kola
         const title = document.createElement("h2")
-        title.textContent = round.round
+        title.textContent = round.name
 
-        // zobrazenie uzávierky kola
         const deadlineText = document.createElement("p")
+        deadlineText.textContent = `Uzávierka: ${
+            round.deadline
+                ? new Date(round.deadline).toLocaleString("sk-SK")
+                : "nezadaná"
+        }`
 
-        deadlineText.textContent =
-            `Uzávierka: ${
-                round.deadline
-                    ? new Date(round.deadline)
-                        .toLocaleString("sk-SK")
-                    : "nezadaná"
-            }`
+        const toggleButton = document.createElement("button")
+        toggleButton.textContent = "Skryť"
 
-        // tlačidlo na skrytie/zobrazenie tabuľky kola
-        const toggleBtn = document.createElement("button")
-        toggleBtn.textContent = "Skryť"
+        const addMatchButton = document.createElement("button")
+        addMatchButton.textContent = "Pridať zápas"
+        addMatchButton.hidden = !isAdmin
 
-        // tlačidlo na pridanie zápasu do kola
-        const addMatchBtn = document.createElement("button")
-addMatchBtn.textContent = "Pridať zápas"
+        addMatchButton.addEventListener("click", async () => {
+            const matchName = prompt("Zadaj zápas, napr. Slovan : Trnava")
+            if (!matchName) return
 
-addMatchBtn.addEventListener("click", () => {
-    const matchName = prompt("Zadaj zápas, napr. KE : SK")
-    if (!matchName) return
+            try {
+                await rpc("add_match", {
+                    p_admin_pin: adminPinSession,
+                    p_round_id: round.id,
+                    p_name: matchName
+                })
 
-    seasson[roundIndex].matches.push({
-        name: matchName,
-        result: {
-            home: null,
-            away: null
-        }
-    })
-
-    Object.values(players).forEach(player => {
-        player.tips[roundIndex].push({
-            name: matchName,
-            myTips: null
+                await refreshAllData()
+            } catch (error) {
+                console.error("Pridanie zápasu zlyhalo:", error)
+                alert(getErrorMessage(error, "Zápas sa nepodarilo pridať."))
+            }
         })
-    })
 
-    saveToStorage()
-    renderAll()
-})
-        // tlačidlo na odstránenie celého kola
-        const deleteRoundBtn = document.createElement("button")
-        deleteRoundBtn.textContent = "Odstrániť kolo"
-            
-        deleteRoundBtn.addEventListener("click", () => {
-            const confirmDelete = confirm (`Naozaj chceš odstránit ${round.round}?`)
-            if(!confirmDelete) return
-            seasson.splice(roundIndex, 1)
+        const deleteRoundButton = document.createElement("button")
+        deleteRoundButton.textContent = "Odstrániť kolo"
+        deleteRoundButton.hidden = !isAdmin
 
-            Object.values(players).forEach(player => {
-                player.tips.splice(roundIndex, 1)
-            })
+        deleteRoundButton.addEventListener("click", async () => {
+            const confirmed = confirm(`Naozaj chceš odstrániť ${round.name}?`)
+            if (!confirmed) return
 
-            // seasson.forEach((round, index) => {
-            //     round.round = `${index + 1}.kolo`
-            // })
+            try {
+                await rpc("delete_round", {
+                    p_admin_pin: adminPinSession,
+                    p_round_id: round.id
+                })
 
-            saveToStorage()
-            renderAll()
-        })    
+                await refreshAllData()
+            } catch (error) {
+                console.error("Odstránenie kola zlyhalo:", error)
+                alert(getErrorMessage(error, "Kolo sa nepodarilo odstrániť."))
+            }
+        })
 
-        // vytvorenie tabuľky pre jedno kolo
+        const tableScroll = document.createElement("div")
+        tableScroll.className = "table-scroll"
+
         const table = document.createElement("table")
-            toggleBtn.addEventListener("click", () => {
-                if (table.style.display === "none") {
-                    table.style.display = "table"
-                    toggleBtn.textContent = "Skryť"
-                } else {
-                    table.style.display = "none"
-                    toggleBtn.textContent = "Zobraziť"
-                }
-            })
 
-            if (roundIndex !== seasson.length - 1) {
-                    table.style.display = "none"
-                    toggleBtn.textContent = "Zobraziť"
-                }
-            
-        // hlavička tabuľky
-        const thead = document.createElement("thead")
-
-        const tableRow1 = document.createElement("tr")
-
-        const tableZapas = document.createElement("th")
-        tableZapas.textContent = "Zápas"
-        tableZapas.rowSpan = 2
-
-        const tableVysledok = document.createElement("th")
-        tableVysledok.textContent = "Výsledok"
-        tableVysledok.rowSpan = 2
-
-        tableRow1.appendChild(tableZapas)
-        tableRow1.appendChild(tableVysledok)
-
-        Object.entries(players).forEach(([playerKey, player]) => {
-    const thPlayer = document.createElement("th")
-
-    const isOpened = openedPlayers[playerKey]
-
-    thPlayer.textContent = isOpened
-        ? `▼ ${player.name}`
-        : `▶ ${player.name}`
-
-    thPlayer.colSpan = isOpened ? 2 : 1
-    thPlayer.style.cursor = "pointer"
-    thPlayer.style.backgroundColor = player.color || "#eee"
-
-    thPlayer.addEventListener("click", () => {
-        openedPlayers[playerKey] = !openedPlayers[playerKey]
-        renderAll()
-    })
-
-    tableRow1.appendChild(thPlayer)
-})
-
-        const tableRow2 = document.createElement("tr")
-
-        Object.entries(players).forEach(([playerKey, player]) => {
-    const isOpened = openedPlayers[playerKey]
-
-    if (isOpened) {
-        const tableTipy = document.createElement("th")
-        tableTipy.textContent = "Tip"
-        tableTipy.style.backgroundColor = player.color || "#eee"
-
-        const tableBody = document.createElement("th")
-        tableBody.textContent = "Body"
-        tableBody.style.backgroundColor = player.color || "#eee"
-
-        tableRow2.appendChild(tableTipy)
-        tableRow2.appendChild(tableBody)
-    } else {
-        const emptyTh = document.createElement("th")
-        emptyTh.textContent = ""
-        emptyTh.style.backgroundColor = player.color || "#eee"
-
-        tableRow2.appendChild(emptyTh)
-    }
-})
-        
-        // telo tabuľky - sem pôjdu zápasy
-        const tbody = document.createElement("tbody")
-        
-        // vytvorenie riadkov jednotlivých zápasov
-        round.matches.forEach((match, matchIndex) => {
-            const tr = document.createElement("tr")
-
-            tr.style.cursor = "pointer"
-
-            tr.addEventListener("click", () => {
-
-    // odstráni glow zo všetkých riadkov
-            document
-                .querySelectorAll(".active-match-row")
-                .forEach(row => {
-                    row.classList.remove("active-match-row")
-                    row.style.outline = ""
-                    row.style.boxShadow = ""
-                })
-
-    // pridá glow aktuálnemu riadku
-            tr.classList.add("active-match-row")
-
-            tr.style.outline =
-                "2px solid #00aaff"
-
-            tr.style.boxShadow =
-                "0 0 8px #00aaff, 0 0 18px #00aaff"
+        toggleButton.addEventListener("click", () => {
+            const isHidden = tableScroll.hidden
+            tableScroll.hidden = !isHidden
+            toggleButton.textContent = isHidden ? "Skryť" : "Zobraziť"
         })
 
-            // bunka s názvom zápasu + tlačidlá upraviť/vymazať
-            const tdMatch = document.createElement("td")
-            
-            const matchNameSpan = document.createElement("span")
-            matchNameSpan.textContent = match.name
+        if (roundIndex !== rounds.length - 1) {
+            tableScroll.hidden = true
+            toggleButton.textContent = "Zobraziť"
+        }
 
-            const editMatchBtn = document.createElement("button")
-            editMatchBtn.textContent = "Upraviť"
+        const tableHead = document.createElement("thead")
+        const firstHeaderRow = document.createElement("tr")
+        const secondHeaderRow = document.createElement("tr")
 
-            editMatchBtn.addEventListener("click", () => {
-                const newName = prompt("Zadaj nový názov", match.name)
-                if (!newName) return
+        const matchHeader = document.createElement("th")
+        matchHeader.textContent = "Zápas"
+        matchHeader.rowSpan = 2
 
-                seasson[roundIndex].matches[matchIndex].name = newName
+        const resultHeader = document.createElement("th")
+        resultHeader.textContent = "Výsledok"
+        resultHeader.rowSpan = 2
 
-                Object.values(players).forEach(player => {
-                    player.tips[roundIndex][matchIndex].name = newName
-                })
-                saveToStorage()
+        firstHeaderRow.append(matchHeader, resultHeader)
+
+        players.forEach(player => {
+            const playerHeader = document.createElement("th")
+            const isOpened = Boolean(openedPlayers[player.id])
+
+            playerHeader.textContent = isOpened
+                ? `▼ ${player.name}`
+                : `▶ ${player.name}`
+
+            playerHeader.colSpan = isOpened ? 2 : 1
+            playerHeader.style.cursor = "pointer"
+            playerHeader.style.backgroundColor = player.color || "#e2e8f0"
+            playerHeader.style.color = "#0f172a"
+
+            playerHeader.addEventListener("click", () => {
+                openedPlayers[player.id] = !openedPlayers[player.id]
                 renderAll()
             })
 
-            const deleteMatch = document.createElement ("button")
-            deleteMatch.textContent = "Vymazať"
-            deleteMatch.addEventListener("click", () => {
-                const confirmDelete = confirm(`Naozaj chceš vymazať zápas ${match.name}?`)
-                if (!confirmDelete) return
+            firstHeaderRow.appendChild(playerHeader)
 
-                seasson[roundIndex].matches.splice(matchIndex, 1)
+            if (isOpened) {
+                const tipHeader = document.createElement("th")
+                tipHeader.textContent = "Tip"
+                tipHeader.style.backgroundColor = player.color || "#e2e8f0"
+                tipHeader.style.color = "#0f172a"
 
-                Object.values(players).forEach(player => {
-                    player.tips[roundIndex].splice(matchIndex, 1)
+                const pointsHeader = document.createElement("th")
+                pointsHeader.textContent = "Body"
+                pointsHeader.style.backgroundColor = player.color || "#e2e8f0"
+                pointsHeader.style.color = "#0f172a"
+
+                secondHeaderRow.append(tipHeader, pointsHeader)
+            } else {
+                const emptyHeader = document.createElement("th")
+                emptyHeader.style.backgroundColor = player.color || "#e2e8f0"
+                secondHeaderRow.appendChild(emptyHeader)
+            }
+        })
+
+        tableHead.append(firstHeaderRow, secondHeaderRow)
+
+        const tableBody = document.createElement("tbody")
+
+        ;(round.matches || []).forEach(match => {
+            const row = document.createElement("tr")
+            row.style.cursor = "pointer"
+
+            row.addEventListener("click", () => {
+                document.querySelectorAll(".active-match-row").forEach(activeRow => {
+                    activeRow.classList.remove("active-match-row")
                 })
-                saveToStorage()
-                renderAll()
+
+                row.classList.add("active-match-row")
             })
 
-            
+            const matchCell = document.createElement("td")
+            const matchName = document.createElement("span")
+            matchName.textContent = match.name
+            matchCell.appendChild(matchName)
 
-            tdMatch.appendChild(matchNameSpan)
-           
-           if (loggedPlayerKey) {
-             tdMatch.append(" ")
-             tdMatch.appendChild(editMatchBtn)
-             tdMatch.append(" ")
-             tdMatch.appendChild(deleteMatch)
+            if (isAdmin) {
+                const editButton = document.createElement("button")
+                editButton.textContent = "Upraviť"
+
+                editButton.addEventListener("click", async event => {
+                    event.stopPropagation()
+
+                    const newName = prompt("Zadaj nový názov", match.name)
+                    if (!newName) return
+
+                    try {
+                        await rpc("update_match_name", {
+                            p_admin_pin: adminPinSession,
+                            p_match_id: match.id,
+                            p_name: newName
+                        })
+
+                        await refreshAllData()
+                    } catch (error) {
+                        console.error("Úprava zápasu zlyhala:", error)
+                        alert(getErrorMessage(error, "Zápas sa nepodarilo upraviť."))
+                    }
+                })
+
+                const deleteButton = document.createElement("button")
+                deleteButton.textContent = "Vymazať"
+
+                deleteButton.addEventListener("click", async event => {
+                    event.stopPropagation()
+
+                    const confirmed = confirm(`Naozaj chceš vymazať zápas ${match.name}?`)
+                    if (!confirmed) return
+
+                    try {
+                        await rpc("delete_match", {
+                            p_admin_pin: adminPinSession,
+                            p_match_id: match.id
+                        })
+
+                        await refreshAllData()
+                    } catch (error) {
+                        console.error("Odstránenie zápasu zlyhalo:", error)
+                        alert(getErrorMessage(error, "Zápas sa nepodarilo odstrániť."))
+                    }
+                })
+
+                matchCell.append(" ", editButton, " ", deleteButton)
             }
 
-            
-           
+            const resultCell = document.createElement("td")
+            const resultHome = document.createElement("input")
+            const resultAway = document.createElement("input")
 
-           // bunka so skutočným výsledkom zápasu
-           const tdResult = document.createElement("td")
+            resultHome.type = "number"
+            resultAway.type = "number"
+            resultHome.min = "0"
+            resultAway.min = "0"
+            resultHome.max = "99"
+            resultAway.max = "99"
+            resultHome.value = match.result_home ?? ""
+            resultAway.value = match.result_away ?? ""
+            resultHome.disabled = !isAdmin
+            resultAway.disabled = !isAdmin
 
-        const resultHome = document.createElement("input")
-        resultHome.type = "number"
-        resultHome.value = match.result.home !== null ? match.result.home : ""
-        resultHome.style.width = "40px"
+            const saveCurrentResult = () => {
+                saveResult(match.id, resultHome.value, resultAway.value)
+            }
 
-        const resultAway = document.createElement("input")
-        resultAway.type = "number"
-        resultAway.value = match.result.away !== null ? match.result.away : ""
-        resultAway.style.width = "40px"
+            resultHome.addEventListener("change", saveCurrentResult)
+            resultAway.addEventListener("change", saveCurrentResult)
 
-        if (!loggedPlayerKey) {
-            resultHome.disabled = true
-            resultAway.disabled = true
-        }
+            resultCell.append(resultHome, " : ", resultAway)
 
-        resultHome.addEventListener("change", () => {
-            saveResult(roundIndex, matchIndex, resultHome.value, resultAway.value)
+            row.append(matchCell, resultCell)
+
+            players.forEach(player => {
+                const isOpened = Boolean(openedPlayers[player.id])
+                const tip = getTip(match, player.id)
+                const roundClosed = isRoundClosed(round)
+                const isMyTip = Number(loggedPlayer?.id) === Number(player.id)
+
+                if (!isOpened) {
+                    const closedCell = document.createElement("td")
+                    closedCell.textContent = "▶"
+                    closedCell.style.backgroundColor = player.color || "#e2e8f0"
+                    closedCell.style.color = "#0f172a"
+                    row.appendChild(closedCell)
+                    return
+                }
+
+                const tipCell = document.createElement("td")
+                const pointsCell = document.createElement("td")
+                tipCell.style.backgroundColor = player.color || "#e2e8f0"
+                pointsCell.style.backgroundColor = player.color || "#e2e8f0"
+                tipCell.style.color = "#0f172a"
+                pointsCell.style.color = "#0f172a"
+
+                const inputHome = document.createElement("input")
+                const inputAway = document.createElement("input")
+
+                inputHome.type = "number"
+                inputAway.type = "number"
+                inputHome.min = "0"
+                inputAway.min = "0"
+                inputHome.max = "99"
+                inputAway.max = "99"
+
+                inputHome.value = tip ? tip.home : ""
+                inputAway.value = tip ? tip.away : ""
+
+                const canEdit = isMyTip && !roundClosed
+                inputHome.disabled = !canEdit
+                inputAway.disabled = !canEdit
+
+                const saveCurrentTip = () => {
+                    saveTip(match.id, inputHome.value, inputAway.value)
+                }
+
+                inputHome.addEventListener("change", saveCurrentTip)
+                inputAway.addEventListener("change", saveCurrentTip)
+
+                tipCell.append(inputHome, " : ", inputAway)
+
+                if (
+                    roundClosed
+                    && tip
+                    && match.result_home !== null
+                    && match.result_away !== null
+                ) {
+                    pointsCell.textContent = String(
+                        calculateMatchPoints(
+                            {
+                                home: Number(match.result_home),
+                                away: Number(match.result_away)
+                            },
+                            {
+                                home: Number(tip.home),
+                                away: Number(tip.away)
+                            }
+                        )
+                    )
+                } else {
+                    pointsCell.textContent = "0"
+                }
+
+                row.append(tipCell, pointsCell)
+            })
+
+            tableBody.appendChild(row)
         })
 
-        resultAway.addEventListener("change", () => {
-            saveResult(roundIndex, matchIndex, resultHome.value, resultAway.value)
+        const totalRow = document.createElement("tr")
+        const totalLabel = document.createElement("td")
+        totalLabel.textContent = "Body v kole"
+        totalLabel.colSpan = 2
+        totalRow.appendChild(totalLabel)
+
+        players.forEach(player => {
+            const isOpened = Boolean(openedPlayers[player.id])
+            const roundPoints = getRoundPoints(round, player.id)
+
+            if (isOpened) {
+                const emptyCell = document.createElement("td")
+                emptyCell.textContent = "-"
+                emptyCell.style.backgroundColor = player.color || "#e2e8f0"
+                emptyCell.style.color = "#0f172a"
+
+                const pointsCell = document.createElement("td")
+                pointsCell.textContent = String(roundPoints)
+                pointsCell.style.backgroundColor = player.color || "#e2e8f0"
+                pointsCell.style.color = "#0f172a"
+
+                totalRow.append(emptyCell, pointsCell)
+            } else {
+                const pointsCell = document.createElement("td")
+                pointsCell.textContent = String(roundPoints)
+                pointsCell.style.backgroundColor = player.color || "#e2e8f0"
+                pointsCell.style.color = "#0f172a"
+                totalRow.appendChild(pointsCell)
+            }
         })
 
-        tdResult.appendChild(resultHome)
-        tdResult.append(" : ")
-        tdResult.appendChild(resultAway)
+        tableBody.appendChild(totalRow)
+        table.append(tableHead, tableBody)
+        tableScroll.appendChild(table)
 
-            tr.appendChild(tdMatch)
-            tr.appendChild(tdResult)
+        const roundControls = document.createElement("div")
+        roundControls.className = "round-controls"
+        roundControls.append(toggleButton, addMatchButton, deleteRoundButton)
 
-            // vytvorenie tipovacieho poľa pre každého hráča
-            Object.entries(players).forEach(([playerKey, player]) => {
-    const tip = player.tips?.[roundIndex]?.[matchIndex]?.myTips
-    const isOpened = openedPlayers[playerKey]
-
-
-    if (!isOpened) {
-    const closedTd = document.createElement("td")
-    closedTd.textContent = "▶"
-    closedTd.style.textAlign = "center"
-    closedTd.style.backgroundColor = player.color || "#eee"
-
-    tr.appendChild(closedTd)
-    return
-    }
-
-    const tdTip = document.createElement("td")
-    const tdPoints = document.createElement("td")
-    tdTip.style.backgroundColor =
-        player.color || "#eee"
-
-    tdPoints.style.backgroundColor =
-        player.color || "#eee"
-
-    const inputHome = document.createElement("input")
-inputHome.type = "number"
-inputHome.style.width = "40px"
-
-const inputAway = document.createElement("input")
-inputAway.type = "number"
-inputAway.style.width = "40px"
-
-// zistíme, či už deadline prešiel
-const roundClosed =
-    round.deadline && new Date() > new Date(round.deadline)
-
-// zistíme, či tento stĺpec patrí prihlásenému hráčovi
-const isMyTip =
-    playerKey === loggedPlayerKey
-
-// hodnoty zobrazíme iba:
-// 1. vlastníkovi tipu pred deadline
-// 2. všetkým po deadline
-inputHome.value =
-    (isMyTip || roundClosed) && tip
-        ? tip.home
-        : ""
-
-inputAway.value =
-    (isMyTip || roundClosed) && tip
-        ? tip.away
-        : ""
-
-// ak to nie je môj tip a deadline ešte neprešiel,
-// políčka zamkneme
-if (!isMyTip && !roundClosed) {
-    inputHome.disabled = true
-    inputAway.disabled = true
-}
-
-// po deadline sa všetky tipy zamknú
-if (roundClosed) {
-    inputHome.disabled = true
-    inputAway.disabled = true
-}
-
-
-    // elektrický efekt riadku
-    inputHome.addEventListener("focus", () => {
-        tr.style.outline = "2px solid #00aaff"
-        tr.style.boxShadow =
-            "0 0 8px #00aaff, 0 0 16px #00aaff"
-        tr.style.transition =
-            "all 0.15s ease"
-    })
-
-    inputAway.addEventListener("focus", () => {
-        tr.style.outline = "2px solid #00aaff"
-        tr.style.boxShadow =
-            "0 0 8px #00aaff, 0 0 16px #00aaff"
-        tr.style.transition =
-            "all 0.15s ease"
-    })
-
-    inputHome.addEventListener("blur", () => {
-        tr.style.outline = ""
-        tr.style.boxShadow = ""
-    })
-
-    inputAway.addEventListener("blur", () => {
-        tr.style.outline = ""
-        tr.style.boxShadow = ""
-    })
-
-    inputHome.addEventListener("change", () => {
-    saveTip(
-        playerKey,
-        roundIndex,
-        matchIndex,
-        inputHome.value,
-        inputAway.value
-    )
-})
-
-inputAway.addEventListener("change", () => {
-    saveTip(
-        playerKey,
-        roundIndex,
-        matchIndex,
-        inputHome.value,
-        inputAway.value
-    )
-})
-
-    tdTip.appendChild(inputHome)
-    tdTip.append(" : ")
-    tdTip.appendChild(inputAway)
-
-   if (
-    roundClosed &&
-    tip &&
-    match.result.home !== null &&
-    match.result.away !== null
-) {
-    tdPoints.textContent = points({
-        result: match.result,
-        myTips: tip
-    })
-} else {
-    tdPoints.textContent = "0"
-}
-
-    tr.appendChild(tdTip)
-    tr.appendChild(tdPoints)
-})
-
-            tbody.appendChild(tr)
-
-            
-        })
-        // posledný riadok tabuľky - súčet bodov hráčov v danom kole
-        // posledný riadok tabuľky - súčet bodov hráčov v danom kole
-const totalRow = document.createElement("tr")
-
-const totalText = document.createElement("td")
-totalText.textContent = "Body v kole"
-totalText.colSpan = 2
-
-totalRow.appendChild(totalText)
-
-Object.entries(players).forEach(([playerKey, player]) => {
-    const isOpened = openedPlayers[playerKey]
-
-    let roundPoints = 0
-
-    round.matches.forEach((match, matchIndex) => {
-        const tip =
-            player.tips?.[roundIndex]?.[matchIndex]?.myTips
-
-        if (
-            !tip ||
-            match.result.home === null ||
-            match.result.away === null
-        ) return
-
-        roundPoints += points({
-            result: match.result,
-            myTips: tip
-        })
-    })
-
-    if (isOpened) {
-    const emptyTd = document.createElement("td")
-    emptyTd.textContent = "-"
-    emptyTd.style.backgroundColor =
-        player.color || "#eee"
-
-    const pointsTd = document.createElement("td")
-    pointsTd.textContent = roundPoints
-    pointsTd.style.backgroundColor =
-        player.color || "#eee"
-
-    totalRow.appendChild(emptyTd)
-    totalRow.appendChild(pointsTd)
-
-} else {
-    const pointsTd = document.createElement("td")
-    pointsTd.textContent = roundPoints
-    pointsTd.style.backgroundColor =
-        player.color || "#eee"
-
-    totalRow.appendChild(pointsTd)
-}
-})
-
-
-
-tbody.appendChild(totalRow)
-
-        thead.appendChild(tableRow1)
-        thead.appendChild(tableRow2)
-
-        table.appendChild(thead)
-        table.appendChild(tbody)
-
-        roundWrapper.appendChild(title)
-        roundWrapper.appendChild(deadlineText)
-        roundWrapper.appendChild(toggleBtn)
-        if (loggedPlayerKey) {
-            roundWrapper.appendChild(addMatchBtn)
-        }
-        if (loggedPlayerKey) {
-            roundWrapper.appendChild(deleteRoundBtn)
-        }
-        roundWrapper.appendChild(table)
-
+        roundWrapper.append(title, deadlineText, roundControls, tableScroll)
         tableRound.appendChild(roundWrapper)
     })
 }
 
-// ==============================
-// ADMIN PANEL
-// ==============================
+// =============================================================
+// 8. ADMIN PANEL
+// =============================================================
 const renderAdminPanel = () => {
+    const adminPanel = document.querySelector("#admin-panel")
     adminPanel.innerHTML = ""
+    adminPanel.hidden = !isAdmin
 
     if (!isAdmin) return
 
     const title = document.createElement("h2")
     title.textContent = "Čakajúce registrácie"
-
     adminPanel.appendChild(title)
 
-    Object.entries(players).forEach(([playerKey, player]) => {
+    if (pendingPlayers.length === 0) {
+        const emptyText = document.createElement("p")
+        emptyText.textContent = "Žiadne čakajúce registrácie."
+        adminPanel.appendChild(emptyText)
+        return
+    }
 
-        // preskočí už schválených
-        if (player.approved) return
+    pendingPlayers.forEach(player => {
+        const row = document.createElement("div")
+        row.className = "pending-player"
 
-        const div = document.createElement("div")
-
-        const name = document.createElement("span")
+        const name = document.createElement("strong")
         name.textContent = player.name
 
-        const approveBtn =
-            document.createElement("button")
+        const approveButton = document.createElement("button")
+        approveButton.textContent = "Schváliť"
 
-        approveBtn.textContent =
-            "Schváliť"
+        approveButton.addEventListener("click", async () => {
+            try {
+                await rpc("approve_player", {
+                    p_admin_pin: adminPinSession,
+                    p_player_id: player.id
+                })
 
-        approveBtn.addEventListener("click", () => {
-
-            players[playerKey].approved = true
-
-            saveToStorage()
-            renderAll()
+                await refreshAllData()
+            } catch (error) {
+                console.error("Schválenie zlyhalo:", error)
+                alert(getErrorMessage(error, "Hráča sa nepodarilo schváliť."))
+            }
         })
 
-        const deleteBtn =
-            document.createElement("button")
+        const deleteButton = document.createElement("button")
+        deleteButton.textContent = "Zamietnuť"
 
-        deleteBtn.textContent =
-            "Zamietnuť"
+        deleteButton.addEventListener("click", async () => {
+            const confirmed = confirm(`Naozaj chceš zamietnuť hráča ${player.name}?`)
+            if (!confirmed) return
 
-        deleteBtn.addEventListener("click", () => {
+            try {
+                await rpc("delete_player", {
+                    p_admin_pin: adminPinSession,
+                    p_player_id: player.id
+                })
 
-            const confirmDelete = confirm(
-                `Naozaj chceš zamietnuť hráča ${player.name}?`
-            )
-
-            if (!confirmDelete) return
-
-            delete players[playerKey]
-
-            saveToStorage()
-            renderAll()
+                await refreshAllData()
+            } catch (error) {
+                console.error("Zamietnutie zlyhalo:", error)
+                alert(getErrorMessage(error, "Registráciu sa nepodarilo zamietnuť."))
+            }
         })
 
-        div.appendChild(name)
-        div.append(" ")
-        div.appendChild(approveBtn)
-        div.append(" ")
-        div.appendChild(deleteBtn)
-
-        adminPanel.appendChild(div)
+        row.append(name, approveButton, deleteButton)
+        adminPanel.appendChild(row)
     })
 }
 
-// ==============================
-// PREKRESLENIE CELEJ APLIKÁCIE
-// ==============================
 const renderAll = () => {
+    updateControlsVisibility()
     renderPlayersTable()
     renderRoundsTable()
     renderAdminPanel()
 }
 
+// =============================================================
+// 9. REGISTRÁCIA A PRIHLÁSENIE
+// =============================================================
+const registerButton = document.querySelector("#btn-register")
+const loginButton = document.querySelector("#btn-login")
+const logoutButton = document.querySelector("#btn-logout")
+const adminLoginButton = document.querySelector("#btn-admin-login")
+const refreshButton = document.querySelector("#btn-refresh")
 
-
-
-
-// ==============================
-// PRIDANIE NOVÉHO HRÁČA
-// ==============================
-// ==============================
-// REGISTRÁCIA NOVÉHO HRÁČA
-// ==============================
-const btnRegister = document.querySelector("#btn-register")
-
-btnRegister.addEventListener("click", async () => {
+registerButton.addEventListener("click", async () => {
     const name = prompt("Zadaj svoje meno")
     if (!name) return
 
-    const pin = prompt("Zadaj svoj PIN")
+    const pin = prompt("Zadaj svoj PIN – minimálne 4 znaky")
     if (!pin) return
 
-    // 1. Najprv načítame najnovšie dáta zo Supabase
-    const { data, error } = await supabaseClient
-        .from("app_data")
-        .select("players, seasson")
-        .eq("id", "main")
-        .maybeSingle()
-
-    if (error) {
-        console.error("Chyba pri načítaní dát:", error)
-        alert("Registrácia zlyhala.")
-        return
-    }
-
-    const latestPlayers = data.players || {}
-    const latestSeasson = data.seasson || []
-
-    // 2. Skontrolujeme, či meno už neexistuje
-    const playerExists = Object.values(latestPlayers).some(player => {
-        return player.name.toLowerCase() === name.toLowerCase()
-    })
-
-    if (playerExists) {
-        alert("Meno už existuje. Zadaj iné meno.")
-        return
-    }
-
-    // 3. Vytvoríme bezpečný nový playerKey
-    const playerNumbers = Object.keys(latestPlayers).map(key => {
-        return Number(key.replace("player", ""))
-    })
-
-    const maxNumber =
-        playerNumbers.length > 0
-            ? Math.max(...playerNumbers)
-            : 0
-
-    const newPlayerKey = "player" + (maxNumber + 1)
-
-    // 4. Vytvoríme tipy podľa aktuálnych kôl a zápasov
-    const newTips = latestSeasson.map(round => {
-        return round.matches.map(match => {
-            return {
-                name: match.name,
-                myTips: null
-            }
+    try {
+        await rpc("register_player", {
+            p_name: name,
+            p_pin: pin
         })
-    })
 
-    // 5. Pridáme nového hráča ako čakajúceho na schválenie
-    latestPlayers[newPlayerKey] = {
-        name: name,
-        pin: pin,
-        approved: false,
-        tips: newTips
+        await refreshAllData()
+        alert("Registrácia bola úspešná. Čakáš na schválenie adminom.")
+    } catch (error) {
+        console.error("Registrácia zlyhala:", error)
+        alert(getErrorMessage(error, "Registrácia zlyhala."))
     }
-
-    // 6. Uložíme späť najnovšie dáta
-    const { error: updateError } = await supabaseClient
-        .from("app_data")
-        .update({
-            players: latestPlayers,
-            seasson: latestSeasson
-        })
-        .eq("id", "main")
-
-    if (updateError) {
-        console.error("Chyba pri registrácii:", updateError)
-        alert("Registrácia zlyhala.")
-        return
-    }
-
-    players = latestPlayers
-    seasson = latestSeasson
-
-    renderAll()
-
-    alert("Registrácia úspešná. Čakáš na schválenie adminom.")
 })
 
-const btnLogin = document.querySelector("#btn-login")
-const btnLogout = document.querySelector("#btn-logout")
-const loginInfo = document.querySelector("#login-info")
-
-btnLogin.addEventListener("click", () => {
+loginButton.addEventListener("click", async () => {
     const name = prompt("Zadaj meno")
     if (!name) return
 
     const pin = prompt("Zadaj PIN")
     if (!pin) return
 
-    const foundPlayerKey = Object.keys(players).find(playerKey => {
-        return players[playerKey].name.toLowerCase() === name.toLowerCase() &&
-               players[playerKey].pin === pin
-    })
+    try {
+        const player = await rpc("login_player", {
+            p_name: name,
+            p_pin: pin
+        })
 
-    if (!foundPlayerKey) {
-        alert("Nesprávne meno alebo PIN")
+        if (!player.approved) {
+            alert("Tvoj účet ešte čaká na schválenie adminom.")
+            return
+        }
+
+        loggedPlayer = {
+            id: Number(player.id),
+            name: player.name,
+            color: player.color,
+            pin
+        }
+
+        isAdmin = false
+        adminPinSession = null
+
+        await refreshAllData()
+    } catch (error) {
+        console.error("Prihlásenie zlyhalo:", error)
+        alert(getErrorMessage(error, "Prihlásenie zlyhalo."))
+    }
+})
+
+adminLoginButton.addEventListener("click", async () => {
+    const pin = prompt("Zadaj admin PIN")
+    if (!pin) return
+
+    try {
+        const valid = await rpc("admin_login", {
+            p_pin: pin
+        })
+
+        if (!valid) {
+            alert("Nesprávny admin PIN.")
+            return
+        }
+
+        isAdmin = true
+        adminPinSession = pin
+        loggedPlayer = null
+
+        await refreshAllData()
+    } catch (error) {
+        console.error("Admin prihlásenie zlyhalo:", error)
+        alert(getErrorMessage(error, "Admin prihlásenie zlyhalo."))
+    }
+})
+
+logoutButton.addEventListener("click", async () => {
+    loggedPlayer = null
+    isAdmin = false
+    adminPinSession = null
+    pendingPlayers = []
+
+    await refreshAllData()
+})
+
+refreshButton.addEventListener("click", refreshAllData)
+
+// =============================================================
+// 10. ADMINISTRÁCIA HRY
+// =============================================================
+const addRoundButton = document.querySelector("#btn-round")
+const resetButton = document.querySelector("#btn-reset")
+const backupButton = document.querySelector("#btn-backup")
+const restoreButton = document.querySelector("#btn-restore")
+const backupFile = document.querySelector("#backup-file")
+
+addRoundButton.addEventListener("click", async () => {
+    if (!isAdmin || !adminPinSession) return
+
+    const nameInput = document.querySelector("#round-name")
+    const deadlineInput = document.querySelector("#round-deadline")
+
+    const name = nameInput.value.trim()
+    const deadline = deadlineInput.value
+
+    if (!name || !deadline) {
+        alert("Vyplň názov kola aj uzávierku.")
         return
     }
 
-    if (!players[foundPlayerKey].approved) {
-    alert("Tvoj účet ešte čaká na schválenie adminom.")
-    return
+    try {
+        await rpc("add_round", {
+            p_admin_pin: adminPinSession,
+            p_name: name,
+            p_deadline: new Date(deadline).toISOString()
+        })
+
+        nameInput.value = ""
+        deadlineInput.value = ""
+
+        await refreshAllData()
+    } catch (error) {
+        console.error("Pridanie kola zlyhalo:", error)
+        alert(getErrorMessage(error, "Kolo sa nepodarilo pridať."))
     }
-
-    loggedPlayerKey = foundPlayerKey
-    loginInfo.textContent = `Prihlásený: ${players[loggedPlayerKey].name}`
-
-    renderAll()
 })
 
-btnLogout.addEventListener("click", () => {
-    loggedPlayerKey = null
-    loginInfo.textContent = "Nikto nie je prihlásený"
+resetButton.addEventListener("click", async () => {
+    if (!isAdmin || !adminPinSession) return
 
-    renderAll()
-})
-
-// ==============================
-// PRIDANIE NOVÉHO KOLA
-// ==============================
-const btnRound = document.querySelector("#btn-round")
-
-btnRound.addEventListener("click", () => {
-
-    if (!loggedPlayerKey) {
-        alert("Najprv sa musíš prihlásiť.")
-        return
-    }
-
-    const roundName =
-        document.querySelector("#round-name").value
-
-    const deadline =
-        document.querySelector("#round-deadline").value
-
-    if (!roundName || !deadline) {
-        alert("Vyplň názov kola aj uzávierku")
-        return
-    }
-
-    const newRound = {
-        round: roundName,
-        deadline: deadline,
-        matches: []
-    }
-
-    seasson.push(newRound)
-
-    Object.values(players).forEach(player => {
-        player.tips.push([])
-    })
-
-    saveToStorage()
-    renderAll()
-
-    // vyčistí inputy
-    document.querySelector("#round-name").value = ""
-    document.querySelector("#round-deadline").value = ""
-})
-
-const btnReset = document.querySelector("#btn-reset")
-
-if (btnReset) {
-    btnReset.addEventListener("click", () => {
-        if (!loggedPlayerKey) {
-    alert("Najprv sa musíš prihlásiť.")
-    return
-}
-        const confirmReset = confirm(
-            "Naozaj chceš vymazať všetkých hráčov aj všetky kolá?"
-        )
-
-        if (!confirmReset) return
-
-        players = {}
-        seasson = []
-        loggedPlayerKey = null
-
-        saveToStorage()
-        renderAll()
-
-        alert("Všetko bolo vymazané")
-    })
-
-const btnBackup =
-    document.querySelector("#btn-backup")
-
-btnBackup.addEventListener("click", () => {
-
-    const backupData = {
-        players: players,
-        seasson: seasson
-    }
-
-    const jsonString =
-        JSON.stringify(backupData, null, 2)
-
-    const blob = new Blob(
-        [jsonString],
-        { type: "application/json" }
+    const confirmed = confirm(
+        "Naozaj chceš vymazať všetkých hráčov, kolá, zápasy aj tipy?"
     )
 
-    const url =
-        URL.createObjectURL(blob)
+    if (!confirmed) return
 
-    const a =
-        document.createElement("a")
+    try {
+        await rpc("reset_game", {
+            p_admin_pin: adminPinSession
+        })
 
-    a.href = url
-    a.download = "tipovacka-zaloha.json"
-
-    a.click()
-
-    URL.revokeObjectURL(url)
+        await refreshAllData()
+        alert("Všetky dáta hry boli vymazané.")
+    } catch (error) {
+        console.error("Vymazanie zlyhalo:", error)
+        alert(getErrorMessage(error, "Dáta sa nepodarilo vymazať."))
+    }
 })
 
-const btnRestore =
-    document.querySelector("#btn-restore")
+backupButton.addEventListener("click", async () => {
+    if (!isAdmin || !adminPinSession) return
 
-const backupFile =
-    document.querySelector("#backup-file")
+    try {
+        const backupData = await rpc("get_backup", {
+            p_admin_pin: adminPinSession
+        })
 
-// po kliknutí otvorí výber súboru
-btnRestore.addEventListener("click", () => {
+        const jsonString = JSON.stringify(backupData, null, 2)
+        const blob = new Blob([jsonString], { type: "application/json" })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement("a")
+
+        link.href = url
+        link.download = `tipovacka-zaloha-${new Date().toISOString().slice(0, 10)}.json`
+        link.click()
+
+        URL.revokeObjectURL(url)
+    } catch (error) {
+        console.error("Záloha zlyhala:", error)
+        alert(getErrorMessage(error, "Zálohu sa nepodarilo vytvoriť."))
+    }
+})
+
+restoreButton.addEventListener("click", () => {
+    if (!isAdmin || !adminPinSession) return
     backupFile.click()
 })
 
-// po vybraní súboru
-backupFile.addEventListener("change", (event) => {
-
-    const file =
-        event.target.files[0]
-
+backupFile.addEventListener("change", event => {
+    const file = event.target.files?.[0]
     if (!file) return
 
-    const reader =
-        new FileReader()
+    const reader = new FileReader()
 
-    reader.onload = async (e) => {
+    reader.onload = async loadEvent => {
         try {
+            const backupData = JSON.parse(loadEvent.target.result)
 
-            const backupData =
-                JSON.parse(e.target.result)
-
-            const confirmRestore = confirm(
-                "Naozaj chceš obnoviť zálohu? Prepíše aktuálne dáta."
+            const confirmed = confirm(
+                "Naozaj chceš obnoviť zálohu? Aktuálne dáta sa prepíšu."
             )
 
-            if (!confirmRestore) return
+            if (!confirmed) return
 
-            players =
-                backupData.players || {}
+            await rpc("restore_backup", {
+                p_admin_pin: adminPinSession,
+                p_backup: backupData
+            })
 
-            seasson =
-                backupData.seasson || []
-
-            await saveToStorage()
-
-            renderAll()
-
-            alert("Záloha úspešne obnovená")
-
+            await refreshAllData()
+            alert("Záloha bola úspešne obnovená.")
         } catch (error) {
-
-            alert(
-                "Neplatný súbor zálohy."
-            )
-
-            console.error(error)
+            console.error("Obnova zálohy zlyhala:", error)
+            alert(getErrorMessage(error, "Súbor zálohy nie je platný."))
+        } finally {
+            backupFile.value = ""
         }
     }
 
     reader.readAsText(file)
 })
-}
 
-const btnAdminLogin = document.querySelector("#btn-admin-login")
-const adminPanel = document.querySelector("#admin-panel")
-
-btnAdminLogin.addEventListener("click", () => {
-    const pin = prompt("Zadaj admin PIN")
-    if (!pin) return
-
-    if (pin !== ADMIN_PIN) {
-        alert("Nesprávny admin PIN")
-        return
-    }
-
-    isAdmin = true
-    loggedPlayerKey = null
-    loginInfo.textContent = "Prihlásený: ADMIN"
-
-    renderAll()
+// =============================================================
+// 11. AUTOMATICKÉ OBNOVENIE PRI NÁVRATE NA KARTU
+// =============================================================
+window.addEventListener("focus", () => {
+    refreshAllData()
 })
-  
 
-    
-// ==============================
-// SPUSTENIE APLIKÁCIE
-// ==============================
-const startApp = async () => {
-    await loadFromStorage()
-    renderAll()
-}
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshAllData()
+})
 
-startApp()
-
-
-
-
-
+// =============================================================
+// 12. SPUSTENIE
+// =============================================================
+updateControlsVisibility()
+refreshAllData()

@@ -184,3 +184,50 @@ tbody tr:hover {
         padding: 6px;
     }
 }
+/* doplnky pre novú databázovú verziu */
+.account-controls,
+#admin-game-controls,
+.round-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
+
+#admin-game-controls[hidden],
+#admin-panel[hidden],
+button[hidden] {
+    display: none !important;
+}
+
+.table-scroll {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.round-card {
+    margin-top: 24px;
+    padding: 18px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.04);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .25);
+}
+
+.pending-player {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.active-match-row {
+    outline: 2px solid #00aaff;
+    box-shadow: 0 0 8px #00aaff, 0 0 18px #00aaff;
+}
+
+button:disabled {
+    opacity: 0.55;
+    cursor: wait;
+}
