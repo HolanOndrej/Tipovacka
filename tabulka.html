@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="./tabulka.css?v=8">
+    <link rel="stylesheet" href="./tabulka.css?v=11">
     <title>Tipovacia hra</title>
 </head>
 <body>
@@ -21,7 +21,7 @@
     <div id="admin-panel"></div>
 
     <section id="admin-game-controls" aria-label="Správa hry">
-        <p class="permission-note">Kolá, zápasy a výsledky môže pridávať každý schválený hráč. Mazanie a zálohy sú iba pre admina.</p>
+        <p class="permission-note">Kolá, zápasy a výsledky môže pridávať každý schválený hráč. Tipovanie uzatvára a znovu otvára iba admin.</p>
         <input
             type="text"
             id="round-name"
@@ -31,7 +31,14 @@
         <input
             type="datetime-local"
             id="round-deadline"
+            aria-label="Orientačný čas uzávierky"
+            title="Tento čas je iba orientačný a tipovanie automaticky neuzavrie."
         >
+
+        <p class="deadline-help">
+            Čas je iba orientačný. Tipovanie sa uzavrie až vtedy, keď admin
+            pri konkrétnom kole klikne na „Uzavrieť tipovanie“.
+        </p>
 
         <button id="btn-round">Pridať kolo</button>
         <button id="btn-reset">Vymazať všetko</button>
@@ -71,6 +78,6 @@
     <div id="table-round"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="./tabulka.js?v=8"></script>
+    <script src="./tabulka.js?v=11"></script>
 </body>
 </html>

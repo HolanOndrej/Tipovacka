@@ -17,6 +17,7 @@ let loggedPlayer = null
 let isAdmin = false
 let adminPinSession = null
 let openedPlayers = {}
+let openedRounds = {}
 let isLoading = false
 
 // Prednastavené tímy pre výber pri pridávaní zápasu.
@@ -147,6 +148,41 @@ const chooseMatchName = () => {
     })
 }
 
+const rerenderRoundsPreservingPosition = () => {
+    const windowScrollY = window.scrollY
+    const horizontalScroll = {}
+
+    document
+        .querySelectorAll(".round-card[data-round-id] .table-scroll")
+        .forEach(scrollContainer => {
+            const roundCard = scrollContainer.closest(".round-card")
+            if (!roundCard) return
+
+            horizontalScroll[roundCard.dataset.roundId] =
+                scrollContainer.scrollLeft
+        })
+
+    renderRoundsTable()
+
+    requestAnimationFrame(() => {
+        Object.entries(horizontalScroll).forEach(([roundId, scrollLeft]) => {
+            const scrollContainer = document.querySelector(
+                `.round-card[data-round-id="${roundId}"] .table-scroll`
+            )
+
+            if (scrollContainer) {
+                scrollContainer.scrollLeft = scrollLeft
+            }
+        })
+
+        window.scrollTo({
+            top: windowScrollY,
+            left: 0,
+            behavior: "auto"
+        })
+    })
+}
+
 const getErrorMessage = (error, fallback) => {
     if (!error) return fallback
 
@@ -162,9 +198,7 @@ const setLoading = (loading) => {
 }
 
 const isRoundClosed = (round) => {
-    if (!round.deadline) return false
-
-    return new Date(round.deadline) <= new Date()
+    return Boolean(round.is_closed)
 }
 
 const getTip = (match, playerId) => {
@@ -494,6 +528,38 @@ const saveTip = async (matchId, home, away) => {
     }
 }
 
+
+const clearResult = async matchId => {
+    if (!isAdmin || !adminPinSession) {
+        alert("Výsledok môže vymazať iba admin.")
+        return
+    }
+
+    const confirmed = confirm(
+        "Naozaj chceš vymazať zadaný výsledok tohto zápasu?"
+    )
+
+    if (!confirmed) return
+
+    try {
+        await rpc("clear_result", {
+            p_admin_pin: adminPinSession,
+            p_match_id: matchId
+        })
+
+        await refreshAllData()
+    } catch (error) {
+        console.error("Výsledok sa nepodarilo vymazať:", error)
+        alert(
+            getErrorMessage(
+                error,
+                "Výsledok sa nepodarilo vymazať."
+            )
+        )
+        await refreshAllData()
+    }
+}
+
 const saveResult = async (matchId, home, away) => {
     if (!isAdmin && !loggedPlayer) {
         alert("Najprv sa musíš prihlásiť.")
@@ -538,16 +604,25 @@ const renderRoundsTable = () => {
     rounds.forEach((round, roundIndex) => {
         const roundWrapper = document.createElement("section")
         roundWrapper.className = "round-card"
+        roundWrapper.dataset.roundId = String(round.id)
 
         const title = document.createElement("h2")
         title.textContent = round.name
 
+        const roundClosed = isRoundClosed(round)
+
         const deadlineText = document.createElement("p")
-        deadlineText.textContent = `Uzávierka: ${
-            round.deadline
-                ? new Date(round.deadline).toLocaleString("sk-SK")
-                : "nezadaná"
-        }`
+        deadlineText.className = roundClosed
+            ? "round-status round-status-closed"
+            : "round-status round-status-open"
+
+        const plannedTime = round.deadline
+            ? new Date(round.deadline).toLocaleString("sk-SK")
+            : null
+
+        deadlineText.textContent = roundClosed
+            ? `Tipovanie: UZAVRETÉ${plannedTime ? ` | Orientačný čas: ${plannedTime}` : ""}`
+            : `Tipovanie: OTVORENÉ${plannedTime ? ` | Orientačný čas: ${plannedTime}` : ""}`
 
         const toggleButton = document.createElement("button")
         toggleButton.textContent = "Skryť"
@@ -583,6 +658,45 @@ const renderRoundsTable = () => {
             }
         })
 
+        const closeRoundButton = document.createElement("button")
+        closeRoundButton.hidden = !isAdmin
+        closeRoundButton.textContent = roundClosed
+            ? "Znovu otvoriť tipovanie"
+            : "Uzavrieť tipovanie"
+        closeRoundButton.className = roundClosed
+            ? "btn-reopen-round"
+            : "btn-close-round"
+
+        closeRoundButton.addEventListener("click", async () => {
+            const newClosedState = !roundClosed
+
+            const confirmed = confirm(
+                newClosedState
+                    ? `Naozaj chceš uzavrieť tipovanie pre ${round.name}? Hráči už nebudú môcť meniť tipy.`
+                    : `Naozaj chceš znovu otvoriť tipovanie pre ${round.name}? Hráči budú môcť tipy opäť meniť.`
+            )
+
+            if (!confirmed) return
+
+            try {
+                await rpc("set_round_closed", {
+                    p_admin_pin: adminPinSession,
+                    p_round_id: round.id,
+                    p_closed: newClosedState
+                })
+
+                await refreshAllData()
+            } catch (error) {
+                console.error("Zmena uzávierky zlyhala:", error)
+                alert(
+                    getErrorMessage(
+                        error,
+                        "Stav tipovania sa nepodarilo zmeniť."
+                    )
+                )
+            }
+        })
+
         const deleteRoundButton = document.createElement("button")
         deleteRoundButton.textContent = "Odstrániť kolo"
         deleteRoundButton.hidden = !isAdmin
@@ -609,16 +723,25 @@ const renderRoundsTable = () => {
 
         const table = document.createElement("table")
 
-        toggleButton.addEventListener("click", () => {
-            const isHidden = tableScroll.hidden
-            tableScroll.hidden = !isHidden
-            toggleButton.textContent = isHidden ? "Skryť" : "Zobraziť"
-        })
+        const hasSavedRoundState = Object.prototype.hasOwnProperty.call(
+            openedRounds,
+            round.id
+        )
 
-        if (roundIndex !== rounds.length - 1) {
-            tableScroll.hidden = true
-            toggleButton.textContent = "Zobraziť"
-        }
+        const isRoundOpen = hasSavedRoundState
+            ? openedRounds[round.id]
+            : roundIndex === rounds.length - 1
+
+        tableScroll.hidden = !isRoundOpen
+        toggleButton.textContent = isRoundOpen ? "Skryť" : "Zobraziť"
+
+        toggleButton.addEventListener("click", () => {
+            const willOpen = tableScroll.hidden
+
+            tableScroll.hidden = !willOpen
+            openedRounds[round.id] = willOpen
+            toggleButton.textContent = willOpen ? "Skryť" : "Zobraziť"
+        })
 
         const tableHead = document.createElement("thead")
         const firstHeaderRow = document.createElement("tr")
@@ -648,9 +771,12 @@ const renderRoundsTable = () => {
             playerHeader.style.backgroundColor = player.color || "#e2e8f0"
             playerHeader.style.color = "#0f172a"
 
-            playerHeader.addEventListener("click", () => {
+            playerHeader.addEventListener("click", event => {
+                event.preventDefault()
+                event.stopPropagation()
+
                 openedPlayers[player.id] = !openedPlayers[player.id]
-                renderAll()
+                rerenderRoundsPreservingPosition()
             })
 
             firstHeaderRow.appendChild(playerHeader)
@@ -771,6 +897,27 @@ const renderRoundsTable = () => {
 
             resultCell.append(resultHome, " : ", resultAway)
 
+            const hasSavedResult =
+                match.result_home !== null
+                && match.result_away !== null
+
+            if (isAdmin && hasSavedResult) {
+                const clearResultButton = document.createElement("button")
+                clearResultButton.type = "button"
+                clearResultButton.className = "btn-clear-result"
+                clearResultButton.textContent = "Vymazať výsledok"
+                clearResultButton.title = "Nastaví výsledok zápasu späť na prázdny"
+
+                clearResultButton.addEventListener("click", event => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    clearResult(match.id)
+                })
+
+                resultCell.appendChild(document.createElement("br"))
+                resultCell.appendChild(clearResultButton)
+            }
+
             row.append(matchCell, resultCell)
 
             players.forEach(player => {
@@ -886,7 +1033,12 @@ const renderRoundsTable = () => {
 
         const roundControls = document.createElement("div")
         roundControls.className = "round-controls"
-        roundControls.append(toggleButton, addMatchButton, deleteRoundButton)
+        roundControls.append(
+            toggleButton,
+            addMatchButton,
+            closeRoundButton,
+            deleteRoundButton
+        )
 
         roundWrapper.append(title, deadlineText, roundControls, tableScroll)
         tableRound.appendChild(roundWrapper)
@@ -1092,24 +1244,28 @@ addRoundButton.addEventListener("click", async () => {
     const name = nameInput.value.trim()
     const deadline = deadlineInput.value
 
-    if (!name || !deadline) {
-        alert("Vyplň názov kola aj uzávierku.")
+    if (!name) {
+        alert("Vyplň názov kola.")
         return
     }
+
+    const deadlineIso = deadline
+        ? new Date(deadline).toISOString()
+        : null
 
     try {
         if (isAdmin) {
             await rpc("add_round", {
                 p_admin_pin: adminPinSession,
                 p_name: name,
-                p_deadline: new Date(deadline).toISOString()
+                p_deadline: deadlineIso
             })
         } else {
             await rpc("player_add_round", {
                 p_player_id: loggedPlayer.id,
                 p_pin: loggedPlayer.pin,
                 p_name: name,
-                p_deadline: new Date(deadline).toISOString()
+                p_deadline: deadlineIso
             })
         }
 
