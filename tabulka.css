@@ -667,3 +667,17 @@ th small {
         font-size: 13px;
     }
 }
+
+@media (max-width: 550px) {
+    .round-card th.sticky-result-column,
+    .round-card td.sticky-result-column {
+        position: static !important;
+        left: auto !important;
+
+        width: 110px;
+        min-width: 110px;
+        max-width: 110px;
+
+        box-shadow: none;
+    }
+}
