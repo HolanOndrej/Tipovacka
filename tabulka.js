@@ -20,6 +20,15 @@ let openedPlayers = {}
 let openedRounds = {}
 let isLoading = false
 
+let selectedSummaryRoundId = null
+let activeChartType = null
+let positionChartInstance = null
+let pointsChartInstance = null
+
+let serverTimeOffsetMs = 0
+let countdownIntervalId = null
+const countdownRefreshKeys = new Set()
+
 // Prednastavené tímy pre výber pri pridávaní zápasu.
 const TEAMS = [
     "Slovan Bratislava",
@@ -197,8 +206,179 @@ const setLoading = (loading) => {
     })
 }
 
+const hasDeadlinePassed = (round) => {
+    if (typeof round.deadline_passed === "boolean") {
+        return round.deadline_passed
+    }
+
+    if (!round.deadline) return false
+    return new Date(round.deadline) <= new Date()
+}
+
 const isRoundClosed = (round) => {
-    return Boolean(round.is_closed)
+    if (typeof round.effective_closed === "boolean") {
+        return round.effective_closed
+    }
+
+    return Boolean(round.is_closed) || hasDeadlinePassed(round)
+}
+
+const getCurrentServerTimeMs = () => {
+    return Date.now() + serverTimeOffsetMs
+}
+
+const formatRemainingTime = milliseconds => {
+    const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000))
+
+    const days = Math.floor(totalSeconds / 86400)
+    const hours = Math.floor((totalSeconds % 86400) / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
+
+    const parts = []
+
+    if (days > 0) parts.push(`${days} d`)
+    parts.push(`${String(hours).padStart(2, "0")} h`)
+    parts.push(`${String(minutes).padStart(2, "0")} min`)
+    parts.push(`${String(seconds).padStart(2, "0")} s`)
+
+    return parts.join(" ")
+}
+
+const updateRoundCountdowns = () => {
+    document
+        .querySelectorAll(".round-countdown[data-deadline]")
+        .forEach(element => {
+            const deadline = element.dataset.deadline
+            const roundId = element.dataset.roundId
+            if (!deadline || !roundId) return
+
+            const remaining =
+                new Date(deadline).getTime() - getCurrentServerTimeMs()
+
+            if (remaining > 0) {
+                element.textContent =
+                    `⏳ Do uzávierky zostáva: ${formatRemainingTime(remaining)}`
+                return
+            }
+
+            element.textContent =
+                "⏳ Čas na tipovanie práve vypršal. Obnovujem kolo…"
+
+            const refreshKey = `${roundId}:${deadline}`
+
+            if (!countdownRefreshKeys.has(refreshKey)) {
+                countdownRefreshKeys.add(refreshKey)
+
+                window.setTimeout(() => {
+                    if (!isLoading) refreshAllData()
+                }, 250)
+            }
+        })
+}
+
+const startCountdownTimer = () => {
+    if (countdownIntervalId) {
+        clearInterval(countdownIntervalId)
+    }
+
+    updateRoundCountdowns()
+    countdownIntervalId = window.setInterval(updateRoundCountdowns, 1000)
+}
+
+const getRoundDisplayPlayers = () => {
+    if (!loggedPlayer) return [...players]
+
+    const myId = Number(loggedPlayer.id)
+    const me = players.find(player => Number(player.id) === myId)
+    const others = players.filter(player => Number(player.id) !== myId)
+
+    return me ? [me, ...others] : [...players]
+}
+
+const toLocalDateTimeInputValue = isoValue => {
+    if (!isoValue) return ""
+
+    const date = new Date(isoValue)
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+
+    return local.toISOString().slice(0, 16)
+}
+
+const chooseDeadline = currentDeadline => {
+    return new Promise(resolve => {
+        const overlay = document.createElement("div")
+        overlay.className = "team-picker-overlay"
+
+        const modal = document.createElement("div")
+        modal.className = "team-picker-modal deadline-picker-modal"
+        modal.setAttribute("role", "dialog")
+        modal.setAttribute("aria-modal", "true")
+
+        const title = document.createElement("h3")
+        title.textContent = "Zmeniť uzávierku"
+
+        const label = document.createElement("label")
+        label.textContent = "Nový dátum a čas uzávierky"
+
+        const input = document.createElement("input")
+        input.type = "datetime-local"
+        input.value = toLocalDateTimeInputValue(currentDeadline)
+
+        const info = document.createElement("p")
+        info.className = "deadline-picker-info"
+        info.textContent =
+            "Po dosiahnutí tohto času sa tipovanie automaticky uzavrie."
+
+        const errorText = document.createElement("p")
+        errorText.className = "team-picker-error"
+
+        const actions = document.createElement("div")
+        actions.className = "team-picker-actions"
+
+        const cancelButton = document.createElement("button")
+        cancelButton.type = "button"
+        cancelButton.textContent = "Zrušiť"
+
+        const saveButton = document.createElement("button")
+        saveButton.type = "button"
+        saveButton.textContent = "Uložiť uzávierku"
+
+        const close = value => {
+            document.removeEventListener("keydown", handleEscape)
+            overlay.remove()
+            resolve(value)
+        }
+
+        const handleEscape = event => {
+            if (event.key === "Escape") close(null)
+        }
+
+        cancelButton.addEventListener("click", () => close(null))
+
+        saveButton.addEventListener("click", () => {
+            if (!input.value) {
+                errorText.textContent = "Vyber dátum a čas."
+                return
+            }
+
+            close(new Date(input.value).toISOString())
+        })
+
+        overlay.addEventListener("click", event => {
+            if (event.target === overlay) close(null)
+        })
+
+        document.addEventListener("keydown", handleEscape)
+
+        label.appendChild(input)
+        actions.append(cancelButton, saveButton)
+        modal.append(title, label, info, errorText, actions)
+        overlay.appendChild(modal)
+        document.body.appendChild(overlay)
+
+        input.focus()
+    })
 }
 
 const getTip = (match, playerId) => {
@@ -360,6 +540,135 @@ const countExactTenPointTips = (playerId) => {
     return exactTips
 }
 
+
+const getClosedRoundEntries = () => {
+    return rounds
+        .map((round, index) => ({ round, index }))
+        .filter(item => isRoundClosed(item.round))
+}
+
+const countPlayerPointsThroughRound = (playerId, targetRoundIndex) => {
+    let total = 0
+
+    rounds.forEach((round, roundIndex) => {
+        if (roundIndex > targetRoundIndex) return
+        if (!isRoundClosed(round)) return
+
+        ;(round.matches || []).forEach(match => {
+            if (match.result_home === null || match.result_away === null) return
+
+            const tip = getTip(match, playerId)
+            if (!tip) return
+
+            total += calculateMatchPoints(
+                {
+                    home: Number(match.result_home),
+                    away: Number(match.result_away)
+                },
+                {
+                    home: Number(tip.home),
+                    away: Number(tip.away)
+                }
+            )
+        })
+    })
+
+    return total
+}
+
+const countTrnavaPointsThroughRound = (playerId, targetRoundIndex) => {
+    let total = 0
+
+    rounds.forEach((round, roundIndex) => {
+        if (roundIndex > targetRoundIndex) return
+        if (!isRoundClosed(round)) return
+
+        ;(round.matches || []).forEach(match => {
+            const matchName = String(match.name || "").toLocaleLowerCase("sk")
+            if (!matchName.includes("trnava")) return
+            if (match.result_home === null || match.result_away === null) return
+
+            const tip = getTip(match, playerId)
+            if (!tip) return
+
+            total += calculateMatchPoints(
+                {
+                    home: Number(match.result_home),
+                    away: Number(match.result_away)
+                },
+                {
+                    home: Number(tip.home),
+                    away: Number(tip.away)
+                }
+            )
+        })
+    })
+
+    return total
+}
+
+const countExactTenPointTipsThroughRound = (playerId, targetRoundIndex) => {
+    let exactTips = 0
+
+    rounds.forEach((round, roundIndex) => {
+        if (roundIndex > targetRoundIndex) return
+        if (!isRoundClosed(round)) return
+
+        ;(round.matches || []).forEach(match => {
+            if (match.result_home === null || match.result_away === null) return
+
+            const tip = getTip(match, playerId)
+            if (!tip) return
+
+            const points = calculateMatchPoints(
+                {
+                    home: Number(match.result_home),
+                    away: Number(match.result_away)
+                },
+                {
+                    home: Number(tip.home),
+                    away: Number(tip.away)
+                }
+            )
+
+            if (points === 10) exactTips += 1
+        })
+    })
+
+    return exactTips
+}
+
+const getStandingsAfterRound = roundIndex => {
+    return players
+        .map(player => ({
+            ...player,
+            roundPoints: getRoundPoints(rounds[roundIndex], player.id),
+            cumulativePoints: countPlayerPointsThroughRound(player.id, roundIndex),
+            trnavaPoints: countTrnavaPointsThroughRound(player.id, roundIndex),
+            exactTenPointTips: countExactTenPointTipsThroughRound(player.id, roundIndex)
+        }))
+        .sort((a, b) => {
+            if (b.cumulativePoints !== a.cumulativePoints) {
+                return b.cumulativePoints - a.cumulativePoints
+            }
+
+            if (b.trnavaPoints !== a.trnavaPoints) {
+                return b.trnavaPoints - a.trnavaPoints
+            }
+
+            if (b.exactTenPointTips !== a.exactTenPointTips) {
+                return b.exactTenPointTips - a.exactTenPointTips
+            }
+
+            return a.name.localeCompare(b.name, "sk")
+        })
+}
+
+const getPlayerChartColor = (index, totalPlayers) => {
+    const hue = Math.round((index * 360) / Math.max(totalPlayers, 1))
+    return `hsl(${hue} 72% 58%)`
+}
+
 const updateControlsVisibility = () => {
     const adminControls = document.querySelector("#admin-game-controls")
     const logoutButton = document.querySelector("#btn-logout")
@@ -403,8 +712,23 @@ const loadGameData = async () => {
         p_pin: loggedPlayer?.pin ?? null
     })
 
+    if (data?.server_now) {
+        serverTimeOffsetMs =
+            new Date(data.server_now).getTime() - Date.now()
+    }
+
     players = Array.isArray(data?.players) ? data.players : []
     rounds = Array.isArray(data?.rounds) ? data.rounds : []
+
+    if (
+        loggedPlayer
+        && !Object.prototype.hasOwnProperty.call(
+            openedPlayers,
+            loggedPlayer.id
+        )
+    ) {
+        openedPlayers[loggedPlayer.id] = true
+    }
 }
 
 const loadPendingPlayers = async () => {
@@ -435,6 +759,7 @@ const refreshAllData = async () => {
     } finally {
         setLoading(false)
         updateControlsVisibility()
+        updateChartPanels()
     }
 }
 
@@ -601,6 +926,8 @@ const renderRoundsTable = () => {
     const tableRound = document.querySelector("#table-round")
     tableRound.innerHTML = ""
 
+    const roundPlayers = getRoundDisplayPlayers()
+
     rounds.forEach((round, roundIndex) => {
         const roundWrapper = document.createElement("section")
         roundWrapper.className = "round-card"
@@ -609,6 +936,8 @@ const renderRoundsTable = () => {
         const title = document.createElement("h2")
         title.textContent = round.name
 
+        const deadlinePassed = hasDeadlinePassed(round)
+        const manuallyClosed = Boolean(round.is_closed)
         const roundClosed = isRoundClosed(round)
 
         const deadlineText = document.createElement("p")
@@ -618,11 +947,35 @@ const renderRoundsTable = () => {
 
         const plannedTime = round.deadline
             ? new Date(round.deadline).toLocaleString("sk-SK")
-            : null
+            : "nezadaná"
 
-        deadlineText.textContent = roundClosed
-            ? `Tipovanie: UZAVRETÉ${plannedTime ? ` | Orientačný čas: ${plannedTime}` : ""}`
-            : `Tipovanie: OTVORENÉ${plannedTime ? ` | Orientačný čas: ${plannedTime}` : ""}`
+        if (manuallyClosed) {
+            deadlineText.textContent =
+                `Tipovanie: UZAVRETÉ ADMINOM | Uzávierka: ${plannedTime}`
+        } else if (deadlinePassed) {
+            deadlineText.textContent =
+                `Tipovanie: UZAVRETÉ ČASOM | Uzávierka: ${plannedTime}`
+        } else {
+            deadlineText.textContent =
+                `Tipovanie: OTVORENÉ | Uzávierka: ${plannedTime}`
+        }
+
+        const countdownText = document.createElement("p")
+        countdownText.className = "round-countdown"
+
+        if (manuallyClosed) {
+            countdownText.textContent =
+                "Tipovanie bolo uzavreté adminom."
+        } else if (deadlinePassed) {
+            countdownText.textContent =
+                "Čas na tipovanie už vypršal."
+        } else if (round.deadline) {
+            countdownText.dataset.deadline = round.deadline
+            countdownText.dataset.roundId = String(round.id)
+        } else {
+            countdownText.textContent =
+                "Uzávierka zatiaľ nie je nastavená."
+        }
 
         const toggleButton = document.createElement("button")
         toggleButton.textContent = "Skryť"
@@ -658,22 +1011,56 @@ const renderRoundsTable = () => {
             }
         })
 
+        const changeDeadlineButton = document.createElement("button")
+        changeDeadlineButton.textContent = "Zmeniť uzávierku"
+        changeDeadlineButton.hidden = !isAdmin
+
+        changeDeadlineButton.addEventListener("click", async () => {
+            const newDeadline = await chooseDeadline(round.deadline)
+            if (!newDeadline) return
+
+            try {
+                await rpc("update_round_deadline", {
+                    p_admin_pin: adminPinSession,
+                    p_round_id: round.id,
+                    p_deadline: newDeadline
+                })
+
+                await refreshAllData()
+            } catch (error) {
+                console.error("Zmena uzávierky zlyhala:", error)
+                alert(
+                    getErrorMessage(
+                        error,
+                        "Uzávierku sa nepodarilo zmeniť."
+                    )
+                )
+            }
+        })
+
         const closeRoundButton = document.createElement("button")
-        closeRoundButton.hidden = !isAdmin
-        closeRoundButton.textContent = roundClosed
+        closeRoundButton.hidden = !isAdmin || (deadlinePassed && !manuallyClosed)
+        closeRoundButton.textContent = manuallyClosed
             ? "Znovu otvoriť tipovanie"
             : "Uzavrieť tipovanie"
-        closeRoundButton.className = roundClosed
+        closeRoundButton.className = manuallyClosed
             ? "btn-reopen-round"
             : "btn-close-round"
 
         closeRoundButton.addEventListener("click", async () => {
-            const newClosedState = !roundClosed
+            const newClosedState = !manuallyClosed
+
+            if (!newClosedState && hasDeadlinePassed(round)) {
+                alert(
+                    "Uzávierka už časovo uplynula. Najprv nastav nový budúci čas uzávierky."
+                )
+                return
+            }
 
             const confirmed = confirm(
                 newClosedState
-                    ? `Naozaj chceš uzavrieť tipovanie pre ${round.name}? Hráči už nebudú môcť meniť tipy.`
-                    : `Naozaj chceš znovu otvoriť tipovanie pre ${round.name}? Hráči budú môcť tipy opäť meniť.`
+                    ? `Naozaj chceš uzavrieť tipovanie pre ${round.name} skôr? Hráči už nebudú môcť meniť tipy.`
+                    : `Naozaj chceš znovu otvoriť tipovanie pre ${round.name}? Hráči budú môcť tipy opäť meniť až do nastavenej uzávierky.`
             )
 
             if (!confirmed) return
@@ -753,12 +1140,23 @@ const renderRoundsTable = () => {
         matchHeader.classList.add("sticky-match-column")
 
         const resultHeader = document.createElement("th")
-        resultHeader.textContent = "Výsledok"
         resultHeader.rowSpan = 2
+        resultHeader.classList.add("sticky-result-column")
+
+        const resultHeaderTitle = document.createElement("span")
+        resultHeaderTitle.className = "result-header-title"
+        resultHeaderTitle.textContent = "Výsledok"
+
+        const resultWarning = document.createElement("small")
+        resultWarning.className = "result-warning"
+        resultWarning.textContent =
+            "(reálny výsledok – ❗ NIE VÁŠ TIP ❗)"
+
+        resultHeader.append(resultHeaderTitle, resultWarning)
 
         firstHeaderRow.append(matchHeader, resultHeader)
 
-        players.forEach(player => {
+        roundPlayers.forEach(player => {
             const playerHeader = document.createElement("th")
             const isOpened = Boolean(openedPlayers[player.id])
 
@@ -873,6 +1271,8 @@ const renderRoundsTable = () => {
             }
 
             const resultCell = document.createElement("td")
+            resultCell.classList.add("sticky-result-column")
+
             const resultHome = document.createElement("input")
             const resultAway = document.createElement("input")
 
@@ -920,7 +1320,7 @@ const renderRoundsTable = () => {
 
             row.append(matchCell, resultCell)
 
-            players.forEach(player => {
+            roundPlayers.forEach(player => {
                 const isOpened = Boolean(openedPlayers[player.id])
                 const tip = getTip(match, player.id)
                 const roundClosed = isRoundClosed(round)
@@ -997,12 +1397,15 @@ const renderRoundsTable = () => {
         })
 
         const totalRow = document.createElement("tr")
+        totalRow.className = "round-total-row"
+
         const totalLabel = document.createElement("td")
         totalLabel.textContent = "Body v kole"
         totalLabel.colSpan = 2
+        totalLabel.className = "round-total-label"
         totalRow.appendChild(totalLabel)
 
-        players.forEach(player => {
+        roundPlayers.forEach(player => {
             const isOpened = Boolean(openedPlayers[player.id])
             const roundPoints = getRoundPoints(round, player.id)
 
@@ -1014,6 +1417,7 @@ const renderRoundsTable = () => {
 
                 const pointsCell = document.createElement("td")
                 pointsCell.textContent = String(roundPoints)
+                pointsCell.className = "round-total-points"
                 pointsCell.style.backgroundColor = player.color || "#e2e8f0"
                 pointsCell.style.color = "#0f172a"
 
@@ -1021,6 +1425,7 @@ const renderRoundsTable = () => {
             } else {
                 const pointsCell = document.createElement("td")
                 pointsCell.textContent = String(roundPoints)
+                pointsCell.className = "round-total-points"
                 pointsCell.style.backgroundColor = player.color || "#e2e8f0"
                 pointsCell.style.color = "#0f172a"
                 totalRow.appendChild(pointsCell)
@@ -1036,11 +1441,18 @@ const renderRoundsTable = () => {
         roundControls.append(
             toggleButton,
             addMatchButton,
+            changeDeadlineButton,
             closeRoundButton,
             deleteRoundButton
         )
 
-        roundWrapper.append(title, deadlineText, roundControls, tableScroll)
+        roundWrapper.append(
+            title,
+            deadlineText,
+            countdownText,
+            roundControls,
+            tableScroll
+        )
         tableRound.appendChild(roundWrapper)
     })
 }
@@ -1063,7 +1475,6 @@ const renderAdminPanel = () => {
         const emptyText = document.createElement("p")
         emptyText.textContent = "Žiadne čakajúce registrácie."
         adminPanel.appendChild(emptyText)
-        return
     }
 
     pendingPlayers.forEach(player => {
@@ -1113,6 +1524,411 @@ const renderAdminPanel = () => {
         row.append(name, approveButton, deleteButton)
         adminPanel.appendChild(row)
     })
+
+    const playersTitle = document.createElement("h2")
+    playersTitle.textContent = "Správa hráčov"
+    adminPanel.appendChild(playersTitle)
+
+    if (players.length === 0) {
+        const noPlayers = document.createElement("p")
+        noPlayers.textContent = "Žiadni schválení hráči."
+        adminPanel.appendChild(noPlayers)
+        return
+    }
+
+    players.forEach(player => {
+        const row = document.createElement("div")
+        row.className = "pending-player approved-player-row"
+
+        const name = document.createElement("strong")
+        name.textContent = player.name
+
+        const deleteButton = document.createElement("button")
+        deleteButton.textContent = "Odstrániť hráča"
+        deleteButton.className = "btn-delete-player"
+
+        deleteButton.addEventListener("click", async () => {
+            const confirmed = confirm(
+                `Naozaj chceš odstrániť hráča ${player.name}? Vymažú sa aj všetky jeho tipy. Túto operáciu nie je možné vrátiť späť.`
+            )
+
+            if (!confirmed) return
+
+            try {
+                await rpc("delete_approved_player", {
+                    p_admin_pin: adminPinSession,
+                    p_player_id: player.id
+                })
+
+                delete openedPlayers[player.id]
+                await refreshAllData()
+            } catch (error) {
+                console.error("Odstránenie hráča zlyhalo:", error)
+                alert(
+                    getErrorMessage(
+                        error,
+                        "Hráča sa nepodarilo odstrániť."
+                    )
+                )
+            }
+        })
+
+        row.append(name, deleteButton)
+        adminPanel.appendChild(row)
+    })
+}
+
+
+const renderRoundSummary = roundId => {
+    const content = document.querySelector("#round-summary-content")
+    const roundIndex = rounds.findIndex(round => Number(round.id) === Number(roundId))
+
+    if (roundIndex < 0 || !isRoundClosed(rounds[roundIndex])) {
+        content.hidden = true
+        content.innerHTML = ""
+        return
+    }
+
+    const round = rounds[roundIndex]
+    const standings = getStandingsAfterRound(roundIndex)
+
+    content.innerHTML = ""
+
+    const title = document.createElement("h2")
+    title.textContent = `${round.name} – výsledky po kole`
+
+    const scroll = document.createElement("div")
+    scroll.className = "table-scroll"
+
+    const table = document.createElement("table")
+    table.className = "round-summary-table"
+
+    const thead = document.createElement("thead")
+    const headerRow = document.createElement("tr")
+
+    ;["Poradie po kole", "Meno", "Body v kole", "Celkovo po kole"].forEach(text => {
+        const th = document.createElement("th")
+        th.textContent = text
+        headerRow.appendChild(th)
+    })
+
+    thead.appendChild(headerRow)
+
+    const tbody = document.createElement("tbody")
+
+    standings.forEach((player, index) => {
+        const row = document.createElement("tr")
+
+        const orderCell = document.createElement("td")
+        orderCell.textContent = String(index + 1)
+
+        const nameCell = document.createElement("td")
+        nameCell.textContent = player.name
+
+        const roundPointsCell = document.createElement("td")
+        roundPointsCell.textContent = String(player.roundPoints)
+
+        const cumulativeCell = document.createElement("td")
+        cumulativeCell.textContent = String(player.cumulativePoints)
+
+        row.append(orderCell, nameCell, roundPointsCell, cumulativeCell)
+        tbody.appendChild(row)
+    })
+
+    table.append(thead, tbody)
+    scroll.appendChild(table)
+    content.append(title, scroll)
+    content.hidden = false
+}
+
+const renderPositionChart = () => {
+    const canvas = document.querySelector("#position-chart")
+    if (!canvas || typeof Chart === "undefined") return
+
+    if (positionChartInstance) {
+        positionChartInstance.destroy()
+        positionChartInstance = null
+    }
+
+    const closedRounds = getClosedRoundEntries()
+    if (closedRounds.length === 0) return
+
+    const labels = closedRounds.map(item => item.round.name)
+
+    const datasets = players.map((player, playerIndex) => {
+        const data = closedRounds.map(item => {
+            const standings = getStandingsAfterRound(item.index)
+            const position = standings.findIndex(
+                standingPlayer => Number(standingPlayer.id) === Number(player.id)
+            )
+
+            return position >= 0 ? position + 1 : null
+        })
+
+        const color = getPlayerChartColor(playerIndex, players.length)
+
+        return {
+            label: player.name,
+            data,
+            borderColor: color,
+            backgroundColor: color,
+            tension: 0.15,
+            pointRadius: 4,
+            pointHoverRadius: 6
+        }
+    })
+
+    positionChartInstance = new Chart(canvas, {
+        type: "line",
+        data: {
+            labels,
+            datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: "nearest",
+                intersect: false
+            },
+            plugins: {
+                legend: {
+                    position: "bottom",
+                    labels: {
+                        color: "#e2e8f0"
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: context => {
+                            return `${context.dataset.label}: ${context.parsed.y}. miesto`
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    reverse: true,
+                    min: 1,
+                    max: Math.max(players.length, 1),
+                    ticks: {
+                        stepSize: 1,
+                        precision: 0,
+                        color: "#cbd5e1",
+                        callback: value => `${value}.`
+                    },
+                    grid: {
+                        color: "rgba(148, 163, 184, 0.16)"
+                    },
+                    title: {
+                        display: true,
+                        text: "Poradie",
+                        color: "#e2e8f0"
+                    }
+                },
+                x: {
+                    ticks: {
+                        color: "#cbd5e1"
+                    },
+                    grid: {
+                        color: "rgba(148, 163, 184, 0.12)"
+                    },
+                    title: {
+                        display: true,
+                        text: "Kolo",
+                        color: "#e2e8f0"
+                    }
+                }
+            }
+        }
+    })
+}
+
+const renderPointsChart = () => {
+    const canvas = document.querySelector("#points-chart")
+    if (!canvas || typeof Chart === "undefined") return
+
+    if (pointsChartInstance) {
+        pointsChartInstance.destroy()
+        pointsChartInstance = null
+    }
+
+    const closedRounds = getClosedRoundEntries()
+    if (closedRounds.length === 0) return
+
+    const labels = closedRounds.map(item => item.round.name)
+
+    const datasets = players.map((player, playerIndex) => {
+        const data = closedRounds.map(item => {
+            return countPlayerPointsThroughRound(player.id, item.index)
+        })
+
+        const color = getPlayerChartColor(playerIndex, players.length)
+
+        return {
+            label: player.name,
+            data,
+            borderColor: color,
+            backgroundColor: color,
+            tension: 0.2,
+            pointRadius: 4,
+            pointHoverRadius: 6
+        }
+    })
+
+    pointsChartInstance = new Chart(canvas, {
+        type: "line",
+        data: {
+            labels,
+            datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: "nearest",
+                intersect: false
+            },
+            plugins: {
+                legend: {
+                    position: "bottom",
+                    labels: {
+                        color: "#e2e8f0"
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        color: "#cbd5e1"
+                    },
+                    grid: {
+                        color: "rgba(148, 163, 184, 0.16)"
+                    },
+                    title: {
+                        display: true,
+                        text: "Celkové body",
+                        color: "#e2e8f0"
+                    }
+                },
+                x: {
+                    ticks: {
+                        color: "#cbd5e1"
+                    },
+                    grid: {
+                        color: "rgba(148, 163, 184, 0.12)"
+                    },
+                    title: {
+                        display: true,
+                        text: "Kolo",
+                        color: "#e2e8f0"
+                    }
+                }
+            }
+        }
+    })
+}
+
+const updateChartPanels = () => {
+    const positionPanel = document.querySelector("#position-chart-panel")
+    const pointsPanel = document.querySelector("#points-chart-panel")
+    const positionButton = document.querySelector("#btn-position-chart")
+    const pointsButton = document.querySelector("#btn-points-chart")
+
+    const hasClosedRounds = getClosedRoundEntries().length > 0
+
+    positionButton.disabled = !hasClosedRounds
+    pointsButton.disabled = !hasClosedRounds
+
+    positionPanel.hidden = activeChartType !== "position"
+    pointsPanel.hidden = activeChartType !== "points"
+
+    positionButton.classList.toggle(
+        "analysis-button-active",
+        activeChartType === "position"
+    )
+
+    pointsButton.classList.toggle(
+        "analysis-button-active",
+        activeChartType === "points"
+    )
+
+    if (activeChartType === "position" && hasClosedRounds) {
+        requestAnimationFrame(renderPositionChart)
+    }
+
+    if (activeChartType === "points" && hasClosedRounds) {
+        requestAnimationFrame(renderPointsChart)
+    }
+}
+
+const renderSeasonAnalysis = () => {
+    const buttonsContainer = document.querySelector("#round-summary-buttons")
+    const content = document.querySelector("#round-summary-content")
+
+    buttonsContainer.innerHTML = ""
+
+    const closedRounds = getClosedRoundEntries()
+
+    if (closedRounds.length === 0) {
+        const info = document.createElement("p")
+        info.className = "analysis-empty"
+        info.textContent =
+            "Po uzavretí prvého kola sa tu zobrazia výsledky po kolách a grafy."
+        buttonsContainer.appendChild(info)
+
+        selectedSummaryRoundId = null
+        content.hidden = true
+        content.innerHTML = ""
+        activeChartType = null
+        updateChartPanels()
+        return
+    }
+
+    if (
+        selectedSummaryRoundId !== null
+        && !closedRounds.some(
+            item => Number(item.round.id) === Number(selectedSummaryRoundId)
+        )
+    ) {
+        selectedSummaryRoundId = null
+    }
+
+    closedRounds.forEach(item => {
+        const button = document.createElement("button")
+        button.type = "button"
+        button.textContent = item.round.name
+
+        const selected =
+            Number(selectedSummaryRoundId) === Number(item.round.id)
+
+        button.classList.toggle("round-summary-button-active", selected)
+
+        button.addEventListener("click", () => {
+            if (
+                Number(selectedSummaryRoundId) === Number(item.round.id)
+            ) {
+                selectedSummaryRoundId = null
+                renderSeasonAnalysis()
+                return
+            }
+
+            selectedSummaryRoundId = item.round.id
+            renderSeasonAnalysis()
+        })
+
+        buttonsContainer.appendChild(button)
+    })
+
+    if (selectedSummaryRoundId !== null) {
+        renderRoundSummary(selectedSummaryRoundId)
+    } else {
+        content.hidden = true
+        content.innerHTML = ""
+    }
+
+    updateChartPanels()
 }
 
 const renderAll = () => {
@@ -1120,6 +1936,8 @@ const renderAll = () => {
     renderPlayersTable()
     renderRoundsTable()
     renderAdminPanel()
+    renderSeasonAnalysis()
+    updateRoundCountdowns()
 }
 
 // =============================================================
@@ -1179,6 +1997,7 @@ loginButton.addEventListener("click", async () => {
 
         isAdmin = false
         adminPinSession = null
+        openedPlayers[loggedPlayer.id] = true
 
         await refreshAllData()
     } catch (error) {
@@ -1223,6 +2042,27 @@ logoutButton.addEventListener("click", async () => {
 
 refreshButton.addEventListener("click", refreshAllData)
 
+const positionChartButton = document.querySelector("#btn-position-chart")
+const pointsChartButton = document.querySelector("#btn-points-chart")
+
+positionChartButton.addEventListener("click", () => {
+    activeChartType =
+        activeChartType === "position"
+            ? null
+            : "position"
+
+    updateChartPanels()
+})
+
+pointsChartButton.addEventListener("click", () => {
+    activeChartType =
+        activeChartType === "points"
+            ? null
+            : "points"
+
+    updateChartPanels()
+})
+
 // =============================================================
 // 10. ADMINISTRÁCIA HRY
 // =============================================================
@@ -1244,14 +2084,12 @@ addRoundButton.addEventListener("click", async () => {
     const name = nameInput.value.trim()
     const deadline = deadlineInput.value
 
-    if (!name) {
-        alert("Vyplň názov kola.")
+    if (!name || !deadline) {
+        alert("Vyplň názov kola aj čas uzávierky.")
         return
     }
 
-    const deadlineIso = deadline
-        ? new Date(deadline).toISOString()
-        : null
+    const deadlineIso = new Date(deadline).toISOString()
 
     try {
         if (isAdmin) {
@@ -1379,4 +2217,5 @@ document.addEventListener("visibilitychange", () => {
 // 12. SPUSTENIE
 // =============================================================
 updateControlsVisibility()
+startCountdownTimer()
 refreshAllData()

@@ -454,3 +454,216 @@ th small {
         white-space: nowrap;
     }
 }
+
+
+/* =========================================================
+   HISTÓRIA KÔL A GRAFY
+   ========================================================= */
+.season-analysis {
+    margin: 10px 0 18px;
+}
+
+.round-summary-buttons,
+.analysis-chart-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.round-summary-buttons {
+    margin-top: 10px;
+}
+
+.analysis-chart-buttons {
+    margin-top: 10px;
+    margin-bottom: 10px;
+}
+
+.round-summary-button-active,
+.analysis-button-active {
+    background: rgba(56, 189, 248, 0.34) !important;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.45);
+}
+
+.round-summary-content,
+.chart-panel {
+    margin-top: 12px;
+    padding: 16px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.round-summary-content h2,
+.chart-panel h2 {
+    margin-top: 0;
+}
+
+.round-summary-table {
+    min-width: 620px;
+}
+
+.chart-wrapper {
+    position: relative;
+    width: 100%;
+    height: 380px;
+}
+
+.analysis-empty {
+    margin: 4px 0;
+    color: #94a3b8;
+}
+
+.btn-delete-player {
+    border-color: rgba(248, 113, 113, 0.62);
+    background: rgba(248, 113, 113, 0.13);
+    color: #fecaca;
+}
+
+.btn-delete-player:hover {
+    background: rgba(248, 113, 113, 0.27);
+    box-shadow: 0 0 10px rgba(248, 113, 113, 0.36);
+}
+
+.deadline-picker-info {
+    margin: 10px 0 0;
+    color: #94a3b8;
+    line-height: 1.45;
+}
+
+.deadline-picker-modal input[type="datetime-local"] {
+    width: 100%;
+}
+
+@media (max-width: 768px) {
+    .round-summary-buttons,
+    .analysis-chart-buttons {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        padding-bottom: 4px;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .round-summary-buttons button,
+    .analysis-chart-buttons button {
+        flex: 0 0 auto;
+        white-space: nowrap;
+    }
+
+    .chart-wrapper {
+        height: 320px;
+        min-width: 620px;
+    }
+
+    .chart-panel {
+        overflow-x: auto;
+    }
+}
+
+
+/* =========================================================
+   v13 – SÚČET BODOV, UPOZORNENIE VÝSLEDKU A COUNTDOWN
+   ========================================================= */
+
+.round-total-row td {
+    border-top: 3px solid rgba(248, 250, 252, 0.55);
+}
+
+.round-total-label {
+    font-weight: 800;
+    font-size: 17px;
+    letter-spacing: 0.01em;
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.round-total-points {
+    font-weight: 900 !important;
+    font-size: 21px;
+}
+
+.result-header-title {
+    display: block;
+    font-weight: 800;
+}
+
+.result-warning {
+    display: block;
+    width: 112px;
+    max-width: 112px;
+    margin: 3px auto 0;
+    color: #f87171;
+    font-size: 10px;
+    line-height: 1.15;
+    font-weight: 800;
+    white-space: normal;
+}
+
+.round-countdown {
+    display: block;
+    width: fit-content;
+    margin: -2px 0 10px;
+    padding: 7px 11px;
+    border-radius: 10px;
+    background: rgba(56, 189, 248, 0.08);
+    border: 1px solid rgba(56, 189, 248, 0.22);
+    color: #bae6fd;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 768px) {
+    /* Druhý fixný stĺpec – reálny výsledok. */
+    .round-card th.sticky-result-column,
+    .round-card td.sticky-result-column {
+        position: sticky !important;
+        left: 150px !important;
+        z-index: 19;
+        width: 126px;
+        min-width: 126px;
+        max-width: 126px;
+        background: #0f172a;
+        box-shadow:
+            1px 0 0 rgba(148, 163, 184, 0.32),
+            8px 0 13px rgba(2, 6, 23, 0.7);
+    }
+
+    .round-card thead th.sticky-result-column {
+        z-index: 39;
+        background: #1e293b;
+    }
+
+    .round-card tbody tr:hover td.sticky-result-column,
+    .round-card tbody tr.active-match-row td.sticky-result-column {
+        background: #162033;
+    }
+
+    .round-card td.sticky-result-column input[type="number"] {
+        width: 42px !important;
+        padding-left: 3px;
+        padding-right: 3px;
+    }
+
+    .round-card td.sticky-result-column .btn-clear-result {
+        white-space: normal;
+        line-height: 1.1;
+    }
+
+    .result-warning {
+        width: 108px;
+        max-width: 108px;
+        font-size: 9px;
+    }
+
+    .round-total-label {
+        font-size: 16px;
+    }
+
+    .round-total-points {
+        font-size: 20px;
+    }
+
+    .round-countdown {
+        font-size: 13px;
+    }
+}

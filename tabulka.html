@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="./tabulka.css?v=11">
+    <link rel="stylesheet" href="./tabulka.css?v=13">
     <title>Tipovacia hra</title>
 </head>
 <body>
@@ -21,7 +21,7 @@
     <div id="admin-panel"></div>
 
     <section id="admin-game-controls" aria-label="Správa hry">
-        <p class="permission-note">Kolá, zápasy a výsledky môže pridávať každý schválený hráč. Tipovanie uzatvára a znovu otvára iba admin.</p>
+        <p class="permission-note">Kolá, zápasy a výsledky môže pridávať každý schválený hráč. Tipovanie sa automaticky uzavrie v čase uzávierky; admin ho môže uzavrieť aj skôr a meniť čas uzávierky.</p>
         <input
             type="text"
             id="round-name"
@@ -36,8 +36,8 @@
         >
 
         <p class="deadline-help">
-            Čas je iba orientačný. Tipovanie sa uzavrie až vtedy, keď admin
-            pri konkrétnom kole klikne na „Uzavrieť tipovanie“.
+            V zadanom čase sa tipovanie automaticky uzavrie. Admin môže uzávierku
+            neskôr zmeniť alebo kolo uzavrieť skôr.
         </p>
 
         <button id="btn-round">Pridať kolo</button>
@@ -68,6 +68,31 @@
         </table>
     </div>
 
+    <section id="season-analysis" class="season-analysis" aria-label="Vývoj súťaže">
+        <div id="round-summary-buttons" class="round-summary-buttons"></div>
+
+        <div class="analysis-chart-buttons">
+            <button id="btn-position-chart" type="button">Graf vývoja poradia</button>
+            <button id="btn-points-chart" type="button">Graf vývoja bodov</button>
+        </div>
+
+        <div id="position-chart-panel" class="chart-panel" hidden>
+            <h2>Vývoj poradia po kolách</h2>
+            <div class="chart-wrapper">
+                <canvas id="position-chart"></canvas>
+            </div>
+        </div>
+
+        <div id="points-chart-panel" class="chart-panel" hidden>
+            <h2>Vývoj celkových bodov po kolách</h2>
+            <div class="chart-wrapper">
+                <canvas id="points-chart"></canvas>
+            </div>
+        </div>
+
+        <div id="round-summary-content" class="round-summary-content" hidden></div>
+    </section>
+
     <p class="tie-breaker-note">
         <strong>T-B1:</strong> body získané v zápasoch, ktorých názov obsahuje „Trnava“.
         <strong>T-B2:</strong> počet presných tipov za 10 bodov.
@@ -78,6 +103,7 @@
     <div id="table-round"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="./tabulka.js?v=11"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="./tabulka.js?v=13"></script>
 </body>
 </html>
